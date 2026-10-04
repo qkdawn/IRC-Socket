@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import logging
 
 from common.irc_message import IRCMessage, message
 from common import numerics
 from common.protocol import is_channel, valid_nickname
-
-logger = logging.getLogger(__name__)
 
 
 class IRCHandlers:
