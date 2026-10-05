@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import random
+from enum import Enum, auto
 from pathlib import Path
+
+
+class CommandAction(Enum):
+    REQUEST_TIME = auto()
 
 
 class BotCommandProcessor:
@@ -12,11 +17,17 @@ class BotCommandProcessor:
         self.rng = rng or random.Random()
         facts_path = facts_path or Path(__file__).with_name("data") / "facts.txt"
         try:
-            self.facts = [line.strip() for line in facts_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.facts = [
+                line.strip()
+                for line in facts_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
         except OSError:
             self.facts = ["The network is made of packets, and packets travel one hop at a time."]
 
-    def channel_command(self, text: str, sender: str, channel_members: set[str]) -> str | None:
+    def channel_command(
+        self, text: str, sender: str, channel_members: set[str]
+    ) -> str | CommandAction | None:
         if not text.startswith("!"):
             return None
         command, _, argument = text[1:].partition(" ")
@@ -45,7 +56,7 @@ class BotCommandProcessor:
                 chosen = sender
             return f"{sender} slaps {chosen} around a bit with a large trout!"
         if command == "time":
-            return "__REQUEST_TIME__"
+            return CommandAction.REQUEST_TIME
         return None
 
     def private_reply(self) -> str:

@@ -2,22 +2,32 @@
 
 from __future__ import annotations
 
+import logging
 import socket
 import threading
-import time
 
 from common.irc_message import IRCMessage, message
 from common.numerics import RPL_NAMREPLY, RPL_TIME, RPL_WELCOME
 from common.stream import IRCStreamDecoder, IRCStreamError
-from .commands import BotCommandProcessor
+
+from .commands import BotCommandProcessor, CommandAction
 from .state import BotState
+
+logger = logging.getLogger(__name__)
 
 
 class BotClient:
-    def __init__(self, host: str = "fc00:1337::17", port: int = 6667, nickname: str = "SuperBot", channel: str = "#hello", reconnect_delay: float = 3.0) -> None:
+    def __init__(
+        self,
+        host: str = "fc00:1337::17",
+        port: int = 6667,
+        nickname: str = "SuperBot",
+        channel: str = "#hello",
+        reconnect_delay: float = 3.0,
+    ) -> None:
         self.host, self.port, self.nickname, self.channel = host, port, nickname, channel
         self.reconnect_delay = reconnect_delay
-        self.state = BotState(nickname)
+        self.state = BotState()
         self.commands = BotCommandProcessor(nickname)
         self.socket: socket.socket | None = None
         self.send_lock = threading.Lock()
@@ -28,18 +38,27 @@ class BotClient:
         while not self.stopping.is_set():
             try:
                 self.run_once()
-            except (ConnectionError, OSError, IRCStreamError):
+            except (ConnectionError, OSError, IRCStreamError) as exc:
+                logger.warning("Bot connection to [%s]:%s ended: %s", self.host, self.port, exc)
                 self.close()
+            except Exception:
+                logger.exception("Unexpected bot protocol error")
+                self.close()
+                raise
             # A bounded delay avoids a tight reconnect loop when the server is
             # unavailable, while still allowing the bot to recover on its own.
             if not self.stopping.wait(self.reconnect_delay):
                 continue
 
     def run_once(self) -> None:
+        # NAMES from the previous session is no longer authoritative after a
+        # reconnect; wait for the new server snapshot before handling commands.
+        self.state.clear()
+        self._time_channel = None
         sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        self.socket = sock
         sock.settimeout(1.0)
         sock.connect((self.host, self.port))
-        self.socket = sock
         decoder = IRCStreamDecoder()
         self.send(message("NICK", self.nickname))
         self.send(message("USER", self.nickname, "0", "*", self.nickname))
@@ -76,11 +95,11 @@ class BotClient:
             names = incoming.params[3].lstrip(":").split()
             self.state.replace_names(incoming.params[2], [name.lstrip("@+%~&") for name in names])
             return
-        if command == RPL_TIME and self._time_channel:
+        if command == RPL_TIME and self._time_channel and incoming.params:
             self.send(message("PRIVMSG", self._time_channel, incoming.params[-1]))
             self._time_channel = None
             return
-        if command == "JOIN" and incoming.prefix:
+        if command == "JOIN" and incoming.prefix and incoming.params:
             nickname = incoming.prefix.split("!", 1)[0]
             channel = incoming.params[0]
             self.state.joined(channel, nickname)
@@ -104,7 +123,7 @@ class BotClient:
         if target.casefold() != self.channel.casefold():
             return
         response = self.commands.channel_command(text, sender, self.state.members(target))
-        if response == "__REQUEST_TIME__":
+        if response is CommandAction.REQUEST_TIME:
             # TIME is a server query, so defer the channel reply until its 391
             # numeric arrives rather than inventing a local timestamp.
             self._time_channel = target
@@ -117,8 +136,8 @@ class BotClient:
         if sock:
             try:
                 sock.close()
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.debug("Bot socket close failed: %s", exc)
 
     def stop(self) -> None:
         self.stopping.set()

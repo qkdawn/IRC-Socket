@@ -1,6 +1,7 @@
 """Command-line configuration for the bot."""
 
 import argparse
+import logging
 
 from .client import BotClient
 
@@ -16,9 +17,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> None:
     args = build_parser().parse_args(argv)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     client = BotClient(args.host, args.port, args.nickname, args.channel)
     try:
         client.run()
     except KeyboardInterrupt:
         client.stop()
-
