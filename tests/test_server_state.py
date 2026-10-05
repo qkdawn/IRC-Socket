@@ -30,6 +30,13 @@ class StateTests(unittest.TestCase):
         self.assertTrue(parted)
         self.assertIn(self.b, members)
 
+    def test_channel_names_are_case_insensitive(self):
+        joined, _ = self.state.join(self.a, "#Room")
+        self.assertTrue(joined)
+        joined, _ = self.state.join(self.a, "#room")
+        self.assertFalse(joined)
+        self.assertEqual(self.state.channel_members("#ROOM"), [self.a])
+
     def test_duplicate_nickname_is_rejected(self):
         with self.assertRaises(ValueError):
             self.state.set_nick(self.b, "ALICE")
@@ -43,4 +50,3 @@ class StateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

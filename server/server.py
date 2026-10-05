@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import socket
 import threading
 import time
-import logging
 
 from common.irc_message import message
+
 from .client_session import ClientSession
 from .handlers import IRCHandlers
 from .state import ClientState, IRCState
@@ -109,8 +110,8 @@ class IRCServer:
         if self.socket:
             try:
                 self.socket.close()
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.debug("Server listener close failed: %s", exc)
         with self.state.lock:
             clients = list(self.state.clients)
         for client in clients:

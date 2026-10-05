@@ -44,6 +44,11 @@ class IRCState:
         with self.lock:
             self.clients.add(client)
 
+    @staticmethod
+    def _channel_key(channel: str) -> str:
+        """IRC channel names are case-insensitive for routing and membership."""
+        return channel.casefold()
+
     def find_nick(self, nick: str) -> ClientState | None:
         with self.lock:
             return self.nicknames.get(nick.casefold())
@@ -70,28 +75,30 @@ class IRCState:
         with self.lock:
             # Return a snapshot so the caller can release the state lock before
             # performing potentially blocking socket writes.
-            members = self.channels.setdefault(channel, set())
+            channel_key = self._channel_key(channel)
+            members = self.channels.setdefault(channel_key, set())
             if client in members:
                 return False, list(members)
             members.add(client)
-            client.channels.add(channel)
+            client.channels.add(channel_key)
             return True, list(members)
 
     def part(self, client: ClientState, channel: str) -> tuple[bool, list[ClientState]]:
         with self.lock:
-            members = self.channels.get(channel)
+            channel_key = self._channel_key(channel)
+            members = self.channels.get(channel_key)
             if not members or client not in members:
                 return False, []
             members.remove(client)
-            client.channels.discard(channel)
+            client.channels.discard(channel_key)
             recipients = list(members) + [client]
             if not members:
-                self.channels.pop(channel, None)
+                self.channels.pop(channel_key, None)
             return True, recipients
 
     def channel_members(self, channel: str) -> list[ClientState]:
         with self.lock:
-            return list(self.channels.get(channel, set()))
+            return list(self.channels.get(self._channel_key(channel), set()))
 
     def channels_for(self, client: ClientState) -> list[str]:
         with self.lock:

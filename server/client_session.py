@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import socket
 import threading
-import logging
 
 from common.irc_message import IRCMessage
 from common.stream import IRCStreamDecoder, IRCStreamError
+
 from .state import ClientState
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,8 @@ class ClientSession:
                     # One recv may contain half a message or many messages;
                     # framing is deliberately delegated to the shared decoder.
                     messages = self.decoder.feed(data)
-                except IRCStreamError:
+                except IRCStreamError as exc:
+                    logger.warning("Malformed IRC input from %s: %s", self.address, exc)
                     self.server.send_error_line(self.client, "Malformed IRC line")
                     break
                 for incoming in messages:

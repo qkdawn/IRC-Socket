@@ -13,9 +13,16 @@ class IntegrationTests(unittest.TestCase):
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         deadline = time.time() + 2
-        while self.server.socket is None and time.time() < deadline:
+        while (
+            (self.server.socket is None or self.server.socket.getsockname()[1] == 0)
+            and time.time() < deadline
+        ):
             time.sleep(0.01)
+        if self.server.socket is None or self.server.socket.getsockname()[1] == 0:
+            self.fail("server did not start listening within two seconds")
         self.port = self.server.socket.getsockname()[1]
+        self.decoders = {}
+        self.pending = {}
 
     def tearDown(self):
         self.server.stop()
@@ -26,28 +33,45 @@ class IntegrationTests(unittest.TestCase):
         sock.settimeout(2)
         sock.connect(("::1", self.port))
         sock.sendall(f"NICK {nick}\r\nUSER {nick} 0 * :{nick}\r\n".encode())
+        self.decoders[sock] = IRCStreamDecoder()
+        self.pending[sock] = []
         return sock
 
-    def read_messages(self, sock):
-        decoder = IRCStreamDecoder()
-        return decoder.feed(sock.recv(4096))
+    def wait_for(self, sock, predicate):
+        """Wait for one decoded IRC message while retaining other messages."""
+        deadline = time.time() + 2
+        while time.time() < deadline:
+            for index, incoming in enumerate(self.pending[sock]):
+                if predicate(incoming):
+                    return self.pending[sock].pop(index)
+            data = sock.recv(4096)
+            if not data:
+                break
+            self.pending[sock].extend(self.decoders[sock].feed(data))
+        self.fail("timed out waiting for an expected IRC message")
 
     def test_two_clients_channel_and_private_routing(self):
         alice = self.connect("alice")
         bob = self.connect("bob")
         try:
-            self.read_messages(alice)
-            self.read_messages(bob)
-            alice.sendall(b"JOIN #room\r\n")
+            self.wait_for(alice, lambda message: message.command == "001")
+            self.wait_for(bob, lambda message: message.command == "001")
+            alice.sendall(b"JOIN #Room\r\n")
             bob.sendall(b"JOIN #room\r\n")
-            time.sleep(0.05)
-            alice.sendall(b"PRIVMSG #room :hello\r\n")
-            time.sleep(0.05)
-            messages = self.read_messages(bob)
-            self.assertTrue(any(m.command == "PRIVMSG" and m.params[-1] == "hello" for m in messages))
+            self.wait_for(alice, lambda message: message.command == "JOIN")
+            self.wait_for(bob, lambda message: message.command == "JOIN")
+            alice.sendall(b"PRIVMSG #ROOM :hello\r\n")
+            self.wait_for(
+                bob,
+                lambda message: message.command == "PRIVMSG"
+                and message.params[-1] == "hello",
+            )
             alice.sendall(b"PRIVMSG bob :secret\r\n")
-            messages = self.read_messages(bob)
-            self.assertTrue(any(m.params[-1] == "secret" for m in messages))
+            self.wait_for(
+                bob,
+                lambda message: message.command == "PRIVMSG"
+                and message.params[-1] == "secret",
+            )
         finally:
             alice.close()
             bob.close()
