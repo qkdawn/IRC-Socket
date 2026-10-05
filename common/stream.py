@@ -39,7 +39,3 @@ class IRCStreamDecoder:
             except (UnicodeDecodeError, IRCParseError) as exc:
                 raise IRCStreamError(str(exc)) from exc
         return messages
-
-    @property
-    def buffered_bytes(self) -> bytes:
-        return bytes(self._buffer)

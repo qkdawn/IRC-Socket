@@ -73,17 +73,15 @@ class IRCMessage:
             for index, param in enumerate(self.params):
                 is_last = index == len(self.params) - 1
                 if is_last and (not param or " " in param or param.startswith(":")):
-                    pieces.append(":" + param.lstrip(":"))
+                    # The leading colon here is the wire delimiter. Preserve a
+                    # second colon when the logical value itself starts with one.
+                    pieces.append(":" + param)
                 else:
                     pieces.append(param)
         return " ".join(pieces)
 
     def to_bytes(self) -> bytes:
         return (self.serialize() + "\r\n").encode("utf-8")
-
-    def with_prefix(self, prefix: str) -> "IRCMessage":
-        return IRCMessage(self.command, self.params, prefix)
-
 
 def message(command: str, *params: str, prefix: Optional[str] = None) -> IRCMessage:
     return IRCMessage(command, tuple(params), prefix)

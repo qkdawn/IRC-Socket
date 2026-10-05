@@ -12,6 +12,11 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(msg.params, ("#room", "hello world"))
         self.assertEqual(msg.to_bytes(), b":nick!u@h PRIVMSG #room :hello world\r\n")
 
+    def test_trailing_parameter_preserves_a_literal_leading_colon(self):
+        msg = IRCMessage.parse("PRIVMSG #room ::hello\r\n")
+        self.assertEqual(msg.params, ("#room", ":hello"))
+        self.assertEqual(msg.to_bytes(), b"PRIVMSG #room ::hello\r\n")
+
     def test_stream_handles_split_and_coalesced_lines(self):
         decoder = IRCStreamDecoder()
         self.assertEqual(decoder.feed(b"NICK bo"), [])
@@ -27,7 +32,11 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(IRCParseError):
             IRCMessage.parse(":")
 
+    def test_unicode_nickname_is_not_accepted(self):
+        from common.protocol import valid_nickname
+
+        self.assertFalse(valid_nickname("用户"))
+
 
 if __name__ == "__main__":
     unittest.main()
-
