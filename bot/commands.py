@@ -23,7 +23,9 @@ class BotCommandProcessor:
                 if line.strip()
             ]
         except OSError:
-            self.facts = ["The network is made of packets, and packets travel one hop at a time."]
+            self.facts = [
+                "The network is made of packets, and packets travel one hop at a time."
+            ]
 
     def channel_command(
         self, text: str, sender: str, channel_members: set[str]
@@ -40,7 +42,8 @@ class BotCommandProcessor:
             bot_key = self.nickname.casefold()
             sender_key = sender.casefold()
             eligible = {
-                name for key, name in folded_members.items()
+                name
+                for key, name in folded_members.items()
                 if key not in {bot_key, sender_key}
             }
             # The no-argument form excludes both the bot and requester. An

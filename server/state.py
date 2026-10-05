@@ -7,6 +7,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from .errors import NicknameInUseError
+
 
 @dataclass(eq=False)
 class ClientState:
@@ -58,8 +60,11 @@ class IRCState:
             # IRC nickname comparisons are case-insensitive, while preserving
             # the spelling the client chose for display and wire replies.
             old = client.nick
-            if nick.casefold() in self.nicknames and self.nicknames[nick.casefold()] is not client:
-                raise ValueError("nickname in use")
+            if (
+                nick.casefold() in self.nicknames
+                and self.nicknames[nick.casefold()] is not client
+            ):
+                raise NicknameInUseError("nickname in use")
             if old:
                 self.nicknames.pop(old.casefold(), None)
             client.nick = nick

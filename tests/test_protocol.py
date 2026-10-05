@@ -32,10 +32,31 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(IRCParseError):
             IRCMessage.parse(":")
 
+        with self.assertRaises(IRCParseError):
+            IRCMessage("PRIVMSG", ("hello",), prefix="bad prefix")
+
+    def test_message_params_are_normalized_to_an_immutable_tuple(self):
+        msg = IRCMessage("PING", ["token"])
+        self.assertEqual(msg.params, ("token",))
+
+    def test_non_trailing_parameters_cannot_change_wire_arity(self):
+        with self.assertRaises(IRCParseError):
+            IRCMessage("CMD", ("has space", "tail")).serialize()
+
     def test_unicode_nickname_is_not_accepted(self):
         from common.protocol import valid_nickname
 
         self.assertFalse(valid_nickname("用户"))
+
+    def test_channel_names_follow_rfc_shape(self):
+        from common.protocol import is_channel
+
+        self.assertTrue(is_channel("#room"))
+        self.assertTrue(is_channel("&local"))
+        self.assertFalse(is_channel("#"))
+        self.assertFalse(is_channel("#with space"))
+        self.assertFalse(is_channel("#room,other"))
+        self.assertFalse(is_channel("#" + "x" * 50))
 
 
 if __name__ == "__main__":

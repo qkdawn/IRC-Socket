@@ -7,7 +7,7 @@ import socket
 import threading
 
 from common.irc_message import IRCMessage, message
-from common.numerics import RPL_NAMREPLY, RPL_TIME, RPL_WELCOME
+from common.numerics import RPL_ENDOFNAMES, RPL_NAMREPLY, RPL_TIME, RPL_WELCOME
 from common.stream import IRCStreamDecoder, IRCStreamError
 
 from .commands import BotCommandProcessor, CommandAction
@@ -25,7 +25,12 @@ class BotClient:
         channel: str = "#hello",
         reconnect_delay: float = 3.0,
     ) -> None:
-        self.host, self.port, self.nickname, self.channel = host, port, nickname, channel
+        self.host, self.port, self.nickname, self.channel = (
+            host,
+            port,
+            nickname,
+            channel,
+        )
         self.reconnect_delay = reconnect_delay
         self.state = BotState()
         self.commands = BotCommandProcessor(nickname)
@@ -39,7 +44,9 @@ class BotClient:
             try:
                 self.run_once()
             except (ConnectionError, OSError, IRCStreamError) as exc:
-                logger.warning("Bot connection to [%s]:%s ended: %s", self.host, self.port, exc)
+                logger.warning(
+                    "Bot connection to [%s]:%s ended: %s", self.host, self.port, exc
+                )
                 self.close()
             except Exception:
                 logger.exception("Unexpected bot protocol error")
@@ -90,10 +97,19 @@ class BotClient:
             self.send(message("JOIN", self.channel))
             return
         if command == RPL_NAMREPLY and len(incoming.params) >= 4:
-            # NAMES is the initial snapshot; JOIN/PART/QUIT/NICK update it as
-            # live events arrive after the snapshot.
+            # A large channel may be split across several 353 replies. Keep
+            # collecting names until 366 marks the end of this snapshot.
+            channel = incoming.params[2]
+            if not self.state.has_pending_names(channel):
+                self.state.begin_names(channel)
             names = incoming.params[3].lstrip(":").split()
-            self.state.replace_names(incoming.params[2], [name.lstrip("@+%~&") for name in names])
+            self.state.add_names(
+                channel,
+                [name.lstrip("@+%~&") for name in names],
+            )
+            return
+        if command == RPL_ENDOFNAMES and len(incoming.params) >= 2:
+            self.state.finish_names(incoming.params[1])
             return
         if command == RPL_TIME and self._time_channel and incoming.params:
             self.send(message("PRIVMSG", self._time_channel, incoming.params[-1]))
@@ -122,7 +138,9 @@ class BotClient:
             return
         if target.casefold() != self.channel.casefold():
             return
-        response = self.commands.channel_command(text, sender, self.state.members(target))
+        response = self.commands.channel_command(
+            text, sender, self.state.members(target)
+        )
         if response is CommandAction.REQUEST_TIME:
             # TIME is a server query, so defer the channel reply until its 391
             # numeric arrives rather than inventing a local timestamp.

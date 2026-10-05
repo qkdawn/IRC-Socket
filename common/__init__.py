@@ -1,2 +1,1 @@
 """Shared IRC protocol primitives."""
-

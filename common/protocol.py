@@ -1,14 +1,24 @@
 """Protocol-level names and validation shared by client and server."""
 
-IRC_COMMANDS = frozenset({
-    "NICK", "USER", "JOIN", "PART", "PRIVMSG", "NAMES", "QUIT", "PING", "PONG", "TIME"
-})
+IRC_COMMANDS = frozenset(
+    {"NICK", "USER", "JOIN", "PART", "PRIVMSG", "NAMES", "QUIT", "PING", "PONG", "TIME"}
+)
 CHANNEL_PREFIXES = ("#", "&")
 
 
 def is_channel(target: str) -> bool:
-    """Return whether an IRC target uses a supported channel prefix."""
-    return bool(target) and target.startswith(CHANNEL_PREFIXES)
+    """Return whether *target* is a valid channel name in this IRC subset.
+
+    RFC 2812 limits channel names to 50 characters and reserves spaces,
+    commas, colons, and control characters because they have wire-level
+    meaning.  Keeping this check in the shared protocol module prevents the
+    server and bot from quietly disagreeing about valid targets.
+    """
+    if not target or target[0] not in CHANNEL_PREFIXES:
+        return False
+    if not 2 <= len(target) <= 50:
+        return False
+    return all(33 <= ord(char) <= 126 and char not in ",:" for char in target)
 
 
 def valid_nickname(nickname: str) -> bool:

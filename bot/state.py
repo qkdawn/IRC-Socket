@@ -6,6 +6,7 @@ from __future__ import annotations
 class BotState:
     def __init__(self) -> None:
         self.channels: dict[str, set[str]] = {}
+        self._names_in_progress: dict[str, set[str]] = {}
 
     def joined(self, channel: str, nickname: str) -> None:
         # casefold keeps channel keys stable while preserving nickname spelling.
@@ -44,7 +45,24 @@ class BotState:
     def clear(self) -> None:
         """Discard membership learned from a previous TCP connection."""
         self.channels.clear()
+        self._names_in_progress.clear()
+
+    def begin_names(self, channel: str) -> None:
+        self._names_in_progress[channel.casefold()] = set()
+
+    def add_names(self, channel: str, names: list[str]) -> None:
+        self._names_in_progress.setdefault(channel.casefold(), set()).update(names)
+
+    def has_pending_names(self, channel: str) -> bool:
+        return channel.casefold() in self._names_in_progress
+
+    def finish_names(self, channel: str) -> None:
+        channel_key = channel.casefold()
+        names = self._names_in_progress.pop(channel_key, set())
+        self.channels[channel_key] = names
 
     def replace_names(self, channel: str, names: list[str]) -> None:
         # NAMES is authoritative for the snapshot; later events update this set.
-        self.channels[channel.casefold()] = set(names)
+        self.begin_names(channel)
+        self.add_names(channel, names)
+        self.finish_names(channel)

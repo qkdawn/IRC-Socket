@@ -13,7 +13,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from common.stream import IRCStreamDecoder
 
 
-def wait_for(sock: socket.socket, decoder: IRCStreamDecoder, predicate, timeout: float = 5.0):
+def wait_for(
+    sock: socket.socket, decoder: IRCStreamDecoder, predicate, timeout: float = 5.0
+):
     deadline = time.monotonic() + timeout
     pending = []
     sock.settimeout(0.5)
@@ -60,11 +62,21 @@ def main() -> int:
         print("JOIN=PASS")
 
         alice.sendall(f"PRIVMSG {args.channel} :live channel check\r\n".encode())
-        wait_for(bob, bob_decoder, lambda msg: msg.command == "PRIVMSG" and msg.params[-1] == "live channel check")
+        wait_for(
+            bob,
+            bob_decoder,
+            lambda msg: msg.command == "PRIVMSG"
+            and msg.params[-1] == "live channel check",
+        )
         print("CHANNEL_MESSAGE=PASS")
 
         alice.sendall(b"PRIVMSG prebob :live private check\r\n")
-        wait_for(bob, bob_decoder, lambda msg: msg.command == "PRIVMSG" and msg.params[-1] == "live private check")
+        wait_for(
+            bob,
+            bob_decoder,
+            lambda msg: msg.command == "PRIVMSG"
+            and msg.params[-1] == "live private check",
+        )
         print("PRIVATE_MESSAGE=PASS")
 
         alice.sendall(b"PRIVMSG missing_live_user :should fail\r\n")

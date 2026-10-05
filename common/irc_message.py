@@ -23,6 +23,11 @@ class IRCMessage:
         if not command or any(ch.isspace() for ch in command):
             raise IRCParseError("command must be a non-empty token")
         object.__setattr__(self, "command", command.upper())
+        object.__setattr__(self, "params", tuple(self.params))
+        if self.prefix is not None and (
+            not self.prefix or any(ch.isspace() or ch in "\r\n" for ch in self.prefix)
+        ):
+            raise IRCParseError("prefix must be a non-empty token")
         if len(self.params) > 15:
             raise IRCParseError("IRC messages have at most 15 parameters")
         for param in self.params:
@@ -72,6 +77,14 @@ class IRCMessage:
         if self.params:
             for index, param in enumerate(self.params):
                 is_last = index == len(self.params) - 1
+                if not is_last and (
+                    not param
+                    or any(ch.isspace() for ch in param)
+                    or param.startswith(":")
+                ):
+                    raise IRCParseError(
+                        "only the final parameter may contain spaces or start with ':'"
+                    )
                 if is_last and (not param or " " in param or param.startswith(":")):
                     # The leading colon here is the wire delimiter. Preserve a
                     # second colon when the logical value itself starts with one.
@@ -82,6 +95,7 @@ class IRCMessage:
 
     def to_bytes(self) -> bytes:
         return (self.serialize() + "\r\n").encode("utf-8")
+
 
 def message(command: str, *params: str, prefix: Optional[str] = None) -> IRCMessage:
     return IRCMessage(command, tuple(params), prefix)

@@ -12,14 +12,10 @@ class IntegrationTests(unittest.TestCase):
         self.server = IRCServer("::1", 0)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
-        deadline = time.time() + 2
-        while (
-            (self.server.socket is None or self.server.socket.getsockname()[1] == 0)
-            and time.time() < deadline
-        ):
-            time.sleep(0.01)
-        if self.server.socket is None or self.server.socket.getsockname()[1] == 0:
+        if not self.server.ready.wait(2):
             self.fail("server did not start listening within two seconds")
+        if self.server.socket is None:
+            self.fail("server did not expose its listening socket")
         self.port = self.server.socket.getsockname()[1]
         self.decoders = {}
         self.pending = {}

@@ -26,7 +26,9 @@ class ClientSession:
 
     def start(self) -> None:
         self.server.state.add_client(self.client)
-        threading.Thread(target=self.run, name=f"irc-client-{self.address}", daemon=True).start()
+        threading.Thread(
+            target=self.run, name=f"irc-client-{self.address}", daemon=True
+        ).start()
 
     def send(self, msg: IRCMessage) -> None:
         payload = msg.to_bytes()
@@ -76,7 +78,9 @@ class ClientSession:
         try:
             self.socket.shutdown(socket.SHUT_RDWR)
         except OSError as exc:
-            logger.debug("Socket shutdown already complete for %s: %s", self.address, exc)
+            logger.debug(
+                "Socket shutdown already complete for %s: %s", self.address, exc
+            )
         try:
             self.socket.close()
         except OSError as exc:

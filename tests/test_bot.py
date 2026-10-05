@@ -9,14 +9,26 @@ from common.irc_message import message
 class BotTests(unittest.TestCase):
     def test_commands(self):
         bot = BotCommandProcessor("SuperBot")
-        self.assertEqual(bot.channel_command("!hello", "alice", {"alice", "SuperBot"}), "Hello, alice!")
-        self.assertIn("bob", bot.channel_command("!slap bob", "alice", {"alice", "bob", "SuperBot"}))
-        self.assertIn("bob", bot.channel_command("!slap BOB", "alice", {"alice", "bob", "SuperBot"}))
+        self.assertEqual(
+            bot.channel_command("!hello", "alice", {"alice", "SuperBot"}),
+            "Hello, alice!",
+        )
+        self.assertIn(
+            "bob",
+            bot.channel_command("!slap bob", "alice", {"alice", "bob", "SuperBot"}),
+        )
+        self.assertIn(
+            "bob",
+            bot.channel_command("!slap BOB", "alice", {"alice", "bob", "SuperBot"}),
+        )
         self.assertIn(
             "alice",
             bot.channel_command("!slap SUPERBOT", "alice", {"alice", "SuperBot"}),
         )
-        self.assertEqual(bot.channel_command("!slap", "alice", {"alice", "SuperBot"}).split()[2], "alice")
+        self.assertEqual(
+            bot.channel_command("!slap", "alice", {"alice", "SuperBot"}).split()[2],
+            "alice",
+        )
         self.assertIs(
             bot.channel_command("!time", "alice", {"alice"}),
             CommandAction.REQUEST_TIME,
@@ -42,6 +54,22 @@ class BotTests(unittest.TestCase):
         state.clear()
         self.assertEqual(state.members("#room"), set())
 
+    def test_names_snapshot_can_span_multiple_replies(self):
+        state = BotState()
+        state.begin_names("#room")
+        state.add_names("#room", ["alice", "bob"])
+        state.add_names("#ROOM", ["carol"])
+        state.finish_names("#room")
+        self.assertEqual(state.members("#room"), {"alice", "bob", "carol"})
+
+    def test_client_commits_names_only_at_end_of_snapshot(self):
+        bot = BotClient()
+        bot.handle(message("353", "SuperBot", "=", "#room", "alice bob"))
+        self.assertEqual(bot.state.members("#room"), set())
+        bot.handle(message("353", "SuperBot", "=", "#room", "carol"))
+        bot.handle(message("366", "SuperBot", "#room", "End of /NAMES list."))
+        self.assertEqual(bot.state.members("#room"), {"alice", "bob", "carol"})
+
     def test_malformed_server_events_are_ignored(self):
         bot = BotClient()
         bot.handle(message("JOIN"))
@@ -54,8 +82,9 @@ class BotTests(unittest.TestCase):
             def run_once(self):
                 raise RuntimeError("unexpected bot bug")
 
-        with self.assertRaisesRegex(RuntimeError, "unexpected bot bug"):
-            BrokenBot(reconnect_delay=0).run()
+        with self.assertLogs("bot.client", level="ERROR"):
+            with self.assertRaisesRegex(RuntimeError, "unexpected bot bug"):
+                BrokenBot(reconnect_delay=0).run()
 
 
 if __name__ == "__main__":
