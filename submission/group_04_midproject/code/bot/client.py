@@ -63,8 +63,8 @@ class BotClient:
                 continue
 
     def run_once(self) -> None:
-        # Discard stale membership after reconnecting. JOIN events and the new
-        # NAMES snapshot rebuild it; commands may arrive before NAMES completes.
+        # NAMES from the previous session is no longer authoritative after a
+        # reconnect; wait for the new server snapshot before handling commands.
         self.state.clear()
         self._who_channel = None
         self._who_names.clear()
@@ -187,9 +187,6 @@ class BotClient:
                 names = sorted(self.state.members(target))
                 batches = []
                 selected = []
-                # Cap batches at 14 nicknames, below IRC's 15-parameter limit.
-                # The 480-byte budget includes CRLF and leaves 32 bytes of
-                # headroom below the 512-byte line limit.
                 for name in names:
                     candidate = message("ISON", *(selected + [name]))
                     if len(selected) >= 14 or len(candidate.to_bytes()) > 480:

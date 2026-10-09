@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>IRC System Architecture</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:white;color:#222;font-family:Arial,sans-serif}#architecture{width:1120px;padding:28px}h1{font-size:26px;margin:0 0 22px;color:#222;text-align:center}.arch-grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}.arch-layer{border:2px solid #566b7b;padding:16px;background:#fafcfd;border-radius:4px}.arch-layer-title{font-size:20px;font-weight:bold;margin-bottom:12px}.arch-box{background:white;border:1px solid #c5ced5;padding:12px;font-size:17px;line-height:1.5;border-radius:3px}.arch-box+.arch-box{margin-top:10px}small{display:block;font-size:15px;font-weight:normal;color:#48545d}.bot{border-color:#39745c}.user{border-color:#557594}.server{border-color:#557594}.common{border-color:#8a638c;background:#fcfafd;margin-top:20px}.transport{text-align:center;padding:14px;font-size:18px;font-weight:bold;margin:14px 0;border-top:1px solid #bbb;border-bottom:1px solid #bbb}.server-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}.server-grid .arch-box{margin:0}.common-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}.common-grid .arch-box{margin:0}.dependency{text-align:center;font-size:16px;margin-top:18px;color:#555}.note{font-size:14px;color:#555;text-align:center;margin-top:16px}
+</style></head>
+<body><div id="architecture">
+<h1>IPv6 IRC System Architecture</h1>
+<div class="arch-grid">
+<div class="arch-layer bot"><div class="arch-layer-title">Windows Bot</div><div class="arch-box">BotClient<small>IPv6 connection · registration · PING/PONG · reconnect</small></div><div class="arch-box">BotState + BotCommandProcessor<small>Member snapshots/events · !hello · !slap · !who · !time</small><small>Local data: bot/data/facts.txt</small></div></div>
+<div class="arch-layer user"><div class="arch-layer-title">IRC Clients</div><div class="arch-box">HexChat clients<small>Registration · channel membership · private / channel chat</small></div><div class="arch-box">Bot compatibility testing<small>Upstream miniircd is an alternative test server</small><small>It is not a component of the coursework server</small></div></div>
+</div>
+<div class="transport">Clients ⇄ IRC commands and replies over IPv6 TCP ⇄ Server</div>
+<div class="arch-layer server"><div class="arch-layer-title">Ubuntu Coursework Server · [::]:6667</div><div class="server-grid"><div class="arch-box">IRCServer + ClientSession<small>Accept connections</small><small>Per-client receive loop</small><small>Locked socket writes</small></div><div class="arch-box">IRCHandlers<small>NICK / USER · JOIN / PART</small><small>NAMES · PRIVMSG · ISON</small><small>Numeric errors · PING/PONG</small></div><div class="arch-box">IRCState + ClientState<small>Identity and channel indexes</small><small>RLock-protected state</small><small>Disconnect / timeout cleanup</small></div></div></div>
+<div class="dependency">Bot and coursework server both depend on the shared protocol layer below</div>
+<div class="arch-layer common"><div class="arch-layer-title">common · Shared protocol code</div><div class="common-grid"><div class="arch-box">IRCMessage<small>Parse / serialize fields</small><small>Bound outgoing wire length</small></div><div class="arch-box">IRCStreamDecoder<small>CRLF framing · UTF-8 validation</small><small>Split / coalesced TCP reads</small></div><div class="arch-box">protocol + numerics<small>Name/channel validation</small><small>RFC 1459 casemapping</small></div></div></div>
+<div class="note">Network communication is between clients and server; common is a local code dependency, not a network service.</div>
+</div></body></html>

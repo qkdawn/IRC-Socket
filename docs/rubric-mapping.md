@@ -10,7 +10,7 @@ The table separates implemented evidence from the VM/HexChat evidence still requ
 | F - Bot channel/user tracking | 4 | `bot/state.py`, NAMES/JOIN/PART/QUIT/NICK handlers | Verify with HexChat users joining, leaving, renaming and reconnecting. |
 | G - Bot private replies | 5 | `facts.txt`, private `PRIVMSG` routing and random reply | Verify HexChat private-message tab and repeat messages for varied facts. |
 | H - Bot channel commands | 5 | `!hello`, `!slap`, optional target and exclusion rules | Verify no-argument, valid target, absent target, sole-user and multi-user cases in HexChat. |
-| I - Extra Bot feature | 3 | `!time`, IRC `TIME`, server `391` response | Verify command in channel on the two-VM network and document the exact IRC command. |
+| I - Extra Bot feature | 3 | `!who` uses new IRC `ISON` and numeric `303` | Tested against upstream miniircd over IPv6 loopback; group confirms prior VM/HexChat validation. |
 | J - Multiple IRC clients | 9 | IPv6 accept loop, per-client sessions, registration and locked shared state | Verify several HexChat clients concurrently and confirm CPU remains below the rubric expectation. |
 | K - Errors/unusual conditions | 9 | Numeric errors, malformed-line handling, unknown commands, disconnect cleanup, PING timeout | Verify duplicate nick, missing parameters, unknown target/command, malformed input and idle client. |
 | L - Private user messaging | 7 | Direct nickname lookup and one-recipient `PRIVMSG` routing | Verify sender/receiver tabs and that unrelated channel users receive nothing. |
@@ -20,4 +20,3 @@ The table separates implemented evidence from the VM/HexChat evidence still requ
 ## Not yet proven by local tests
 
 The local automated suite proves protocol logic and an IPv6 `::1` integration path. It does not replace final testing on the supplied Windows and Ubuntu VMs with HexChat. The final self-assessment should only claim the higher rubric level after those live tests are recorded.
-

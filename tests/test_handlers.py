@@ -7,6 +7,25 @@ from server.handlers import IRCHandlers
 
 
 class HandlerTests(unittest.TestCase):
+    def test_privmsg_checks_encoded_relay_length(self):
+        client = SimpleNamespace(nick="alice", prefix="alice!u@host")
+        destination = object()
+        server = SimpleNamespace(
+            server_name="server.test", send=Mock(),
+            state=SimpleNamespace(direct_target=lambda target: destination),
+        )
+        handlers = IRCHandlers(server)
+        overhead = len(message("PRIVMSG", "bob", "", prefix=client.prefix).to_bytes()) - 1
+        for text, expected in [("x" * (512 - overhead), "PRIVMSG"),
+                               ("x" * (513 - overhead), "417"),
+                               ("界" * 170, "417")]:
+            with self.subTest(text_length=len(text)):
+                server.send.reset_mock()
+                handlers.cmd_privmsg(client, ("bob", text))
+                reply = server.send.call_args.args[1]
+                self.assertEqual(reply.command, expected)
+                self.assertLessEqual(len(reply.to_bytes()), 512)
+
     def test_unexpected_error_is_not_sent_as_unknown_command(self):
         server = SimpleNamespace(monotonic=lambda: 1.0, send=Mock())
         client = SimpleNamespace(registered=True, last_activity=0.0)

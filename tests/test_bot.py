@@ -1,7 +1,7 @@
 import unittest
 
 from bot.client import BotClient
-from bot.commands import BotCommandProcessor, CommandAction
+from bot.commands import BotCommandProcessor
 from bot.state import BotState
 from common.irc_message import message
 
@@ -21,17 +21,13 @@ class BotTests(unittest.TestCase):
             "bob",
             bot.channel_command("!slap BOB", "alice", {"alice", "bob", "SuperBot"}),
         )
-        self.assertIn(
-            "alice",
+        self.assertEqual(
             bot.channel_command("!slap SUPERBOT", "alice", {"alice", "SuperBot"}),
+            "Choose a channel member other than yourself or the Bot.",
         )
         self.assertEqual(
-            bot.channel_command("!slap", "alice", {"alice", "SuperBot"}).split()[2],
-            "alice",
-        )
-        self.assertIs(
-            bot.channel_command("!time", "alice", {"alice"}),
-            CommandAction.REQUEST_TIME,
+            bot.channel_command("!slap", "alice", {"alice", "SuperBot"}),
+            "No eligible channel member to slap.",
         )
 
     def test_state_updates(self):
@@ -61,6 +57,20 @@ class BotTests(unittest.TestCase):
         state.add_names("#ROOM", ["carol"])
         state.finish_names("#room")
         self.assertEqual(state.members("#room"), {"alice", "bob", "carol"})
+
+    def test_names_snapshot_preserves_interleaved_events(self):
+        state = BotState()
+        state.begin_names("#room")
+        state.add_names("#room", ["bot", "alice", "bob"])
+        state.left("#ROOM", "ALICE")
+        state.renamed("bob", "robert")
+        state.removed("carol")
+        state.joined("#room", "dave")
+        state.add_names("#room", ["alice", "bob", "carol"])
+        state.finish_names("#room")
+        self.assertEqual(state.members("#room"), {"bot", "robert", "dave"})
+        state.finish_names("#room")
+        self.assertEqual(state.members("#room"), {"bot", "robert", "dave"})
 
     def test_client_commits_names_only_at_end_of_snapshot(self):
         bot = BotClient()

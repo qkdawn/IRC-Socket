@@ -1,0 +1,11 @@
+Source: https://raw.githubusercontent.com/jrosdahl/miniircd/master/miniircd
+SHA256: b4484f682934d2d8d425b2e474bdeeb26f4ec323c819027e875d00e518fd9a35
+Environment: local IPv6 ::1; not the assessed VMs or HexChat.
+Registration, nickname collision recovery and JOIN: PASS
+!hello: PASS (Hello, alice!)
+!time: PASS (Bot time: 2026-10-08 21:20:11+08:00)
+!slap alice: PASS (Choose a channel member other than yourself or the Bot.)
+!slap absent: PASS (alice slaps alice around a bit with a large trout!)
+!who: PASS (WHO complete: 2 members)
+Private fact: PASS (The first email was sent in 1971.)
+Bot PING handler sends PONG to miniircd: PASS

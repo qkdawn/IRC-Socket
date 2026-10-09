@@ -13,11 +13,17 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from common.stream import IRCStreamDecoder
 
 
+class LiveDecoder(IRCStreamDecoder):
+    def __init__(self):
+        super().__init__()
+        self.pending = []
+
+
 def wait_for(
     sock: socket.socket, decoder: IRCStreamDecoder, predicate, timeout: float = 5.0
 ):
     deadline = time.monotonic() + timeout
-    pending = []
+    pending = decoder.pending
     sock.settimeout(0.5)
     while time.monotonic() < deadline:
         for index, incoming in enumerate(pending):
@@ -36,7 +42,7 @@ def wait_for(
 def connect(host: str, port: int, nickname: str):
     sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
     sock.connect((host, port))
-    decoder = IRCStreamDecoder()
+    decoder = LiveDecoder()
     sock.sendall(f"NICK {nickname}\r\nUSER {nickname} 0 * :{nickname}\r\n".encode())
     wait_for(sock, decoder, lambda msg: msg.command == "001")
     return sock, decoder

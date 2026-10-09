@@ -14,10 +14,10 @@ def irc_casefold(name: str) -> str:
 def is_channel(target: str) -> bool:
     """Return whether *target* is a valid channel name in this IRC subset.
 
-    This subset accepts 2-50 characters, starting with '#' or '&', and only
-    printable ASCII excluding spaces, commas, and colons. The ASCII restriction
-    is a local choice; the 50-character limit follows RFC 2812. Sharing this
-    check keeps the server and bot consistent about valid targets.
+    RFC 2812 limits channel names to 50 characters and reserves spaces,
+    commas, colons, and control characters because they have wire-level
+    meaning.  Keeping this check in the shared protocol module prevents the
+    server and bot from quietly disagreeing about valid targets.
     """
     if not target or target[0] not in CHANNEL_PREFIXES:
         return False

@@ -53,6 +53,12 @@ class StateTests(unittest.TestCase):
         self.assertIsNone(self.state.find_nick("alice"))
         self.assertEqual(self.state.channel_members("#room"), [])
 
+    def test_repeated_remove_preserves_reused_nickname(self):
+        self.state.remove(self.a)
+        self.state.set_nick(self.b, "ALICE")
+        self.state.remove(self.a)
+        self.assertIs(self.state.find_nick("alice"), self.b)
+
     def test_disconnect_notifies_shared_peers_once(self):
         server = IRCServer()
         leaving_connection = DummyConnection()

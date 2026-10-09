@@ -194,11 +194,6 @@ class IRCHandlers:
             self.send_names(client, channel)
 
     def send_names(self, client, channel: str) -> None:
-        """Send the roster in 353 replies, then terminate it with a 366 reply.
-
-        Split at nickname boundaries using the encoded reply size, including
-        the server prefix, routing fields, and CRLF, against the 512-byte limit.
-        """
         names = sorted(
             member.nick or "*" for member in self.server.state.channel_members(channel)
         )
