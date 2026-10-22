@@ -1,4 +1,5 @@
 import unittest
+import threading
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock
@@ -9,6 +10,7 @@ from bot.state import BotState
 from common.irc_message import IRCMessage, message
 from server.client_session import ClientSession
 from server.server import IRCServer
+from tests.helpers import start_writer
 
 
 class BotTests(unittest.TestCase):
@@ -43,8 +45,18 @@ class BotTests(unittest.TestCase):
                     server.state.add_client(session.client)
                     server.state.set_nick(session.client, nickname)
                     server.state.set_user(session.client, "u" * 30, "Real")
+                delivered_all = threading.Event()
+
+                def receive(_payload):
+                    if receiver.socket.sendall.call_count == len(requests):
+                        delivered_all.set()
+
+                receiver.socket.sendall.side_effect = receive
+                start_writer(self, receiver)
+                self.addCleanup(sender.close)
                 for request in requests:
                     server.handlers.handle(sender.client, request)
+                self.assertTrue(delivered_all.wait(2))
                 delivered = [
                     IRCMessage.parse(call.args[0].decode("utf-8"))
                     for call in receiver.socket.sendall.call_args_list

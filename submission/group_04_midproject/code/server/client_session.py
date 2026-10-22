@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from queue import Empty, Full, Queue
 import socket
 import threading
 from typing import TYPE_CHECKING
@@ -19,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 class ClientSession:
+    MAX_PENDING_MESSAGES = 256
+
     def __init__(self, server: IRCServer, sock: socket.socket, address: tuple) -> None:
         self.server = server
         self.socket = sock
@@ -30,6 +33,10 @@ class ClientSession:
         self.decoder = IRCStreamDecoder()
         self.send_lock = threading.Lock()
         self.closed = threading.Event()
+        self._outgoing: Queue[tuple[IRCMessage, bytes] | None] = Queue(
+            self.MAX_PENDING_MESSAGES
+        )
+        self._writer: threading.Thread | None = None
 
     def start(self) -> None:
         with self.server.state.lock:
@@ -54,12 +61,38 @@ class ClientSession:
             truncate_trailing=msg.command in {"PART", "QUIT", "ERROR"}
         )
         with self.send_lock:
-            if not self.closed.is_set():
+            if self.closed.is_set():
+                raise ConnectionError("session is closed")
+            try:
+                self._outgoing.put_nowait((msg, payload))
+            except Full as exc:
+                raise ConnectionError("client output queue is full") from exc
+
+    def _write_loop(self) -> None:
+        try:
+            while not self.closed.is_set():
+                item = self._outgoing.get()
+                if item is None or self.closed.is_set():
+                    return
+                msg, payload = item
+                if msg.command == "PING":
+                    # Set before sendall so a fast PONG cannot beat this update.
+                    self.server.state.start_ping(self.client, self.server.monotonic())
                 self.socket.sendall(payload)
+        except (ConnectionError, OSError) as exc:
+            logger.info("IRC write failed for %s: %s", self.address, exc)
+            self.server.disconnect(self.client, "Connection lost")
+        except Exception:
+            logger.exception("Unhandled IRC writer error from %s", self.address)
+            self.server.disconnect(self.client, "Output failure")
 
     def run(self) -> None:
         try:
             self.socket.settimeout(1.0)
+            self._writer = threading.Thread(
+                target=self._write_loop, name=f"irc-writer-{self.address}", daemon=True
+            )
+            self._writer.start()
             while not self.closed.is_set() and not self.server.stopping.is_set():
                 try:
                     # A timeout lets the thread notice server shutdown without
@@ -91,11 +124,21 @@ class ClientSession:
             # All exits, including malformed input and TCP resets, pass through
             # the same cleanup path so channel membership cannot become stale.
             self.server.disconnect(self.client, "Connection closed", announce=True)
+            if self._writer is not None and self._writer.ident is not None:
+                self._writer.join(timeout=2)
 
     def close(self) -> None:
-        if self.closed.is_set():
-            return
-        self.closed.set()
+        with self.send_lock:
+            if self.closed.is_set():
+                return
+            self.closed.set()
+            # Discard pending output and wake an idle writer immediately.
+            while True:
+                try:
+                    self._outgoing.get_nowait()
+                except Empty:
+                    break
+            self._outgoing.put_nowait(None)
         try:
             self.socket.shutdown(socket.SHUT_RDWR)
         except OSError as exc:

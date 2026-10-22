@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 
 
 class ClientConnection(Protocol):
+    """Enqueue bounded output without waiting for socket I/O."""
+
     def send(self, msg: IRCMessage) -> None: ...
 
     def close(self) -> None: ...
@@ -29,9 +31,7 @@ class HandlerServer(Protocol):
 
     def join_channel(self, client: ClientState, channel: str) -> bool: ...
 
-    def broadcast_user_channels(
-        self, client: ClientState, msg: IRCMessage, include_self: bool = False
-    ) -> None: ...
+    def set_nickname(self, client: ClientState, nick: str) -> str | None: ...
 
     def disconnect(
         self, client: ClientState, reason: str = "Client Quit", announce: bool = True

@@ -29,6 +29,12 @@ JOIN-before-QUIT ordering and identical final server/Bot membership. Another tes
 fails the JOIN sender's socket before delivering to a healthy peer. ISON throttle
 tests verify both one- and multiple-batch failures, drained replies, no spurious
 query timeout and successful retry.
+Nickname/disconnect regression tests pause nickname mutation while another
+thread disconnects the client, then verify NICK-before-QUIT and the Bot's final
+roster. Delivery tests block one writer and verify another client's broadcast
+and PONG delivery, isolated cleanup after the 256-message queue fills, and
+idle-writer shutdown. Controlled-clock tests verify that queued PINGs do not
+start deadlines or duplicate probes, and that immediate PONGs clear the probe.
 Bot readiness regressions cover membership commands before its own JOIN and
 between NAMES chunks, automatic execution after 366, unrelated-channel replies,
 queue saturation, the NAMES deadline, and stale-command removal on reconnect.

@@ -23,6 +23,7 @@ class ClientState:
     ping_sent: float | None = None
     disconnected: bool = False
     connected_at: float = field(default_factory=time.monotonic)
+    ping_queued: bool = False
 
     @property
     def registered(self) -> bool:
@@ -138,6 +139,13 @@ class IRCState:
     def acknowledge_ping(self, client: ClientState) -> None:
         with self.lock:
             client.ping_sent = None
+
+    def start_ping(self, client: ClientState, now: float) -> None:
+        """Start the PONG deadline when the writer takes the queued probe."""
+        with self.lock:
+            if not client.disconnected and client.ping_queued:
+                client.ping_queued = False
+                client.ping_sent = now
 
     def direct_target(self, nick: str) -> ClientState | None:
         with self.lock:

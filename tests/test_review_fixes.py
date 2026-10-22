@@ -1,4 +1,5 @@
 import unittest
+import threading
 from unittest.mock import Mock
 
 from bot.client import BotClient
@@ -10,6 +11,7 @@ from server.client_session import ClientSession
 from server.errors import NicknameInUseError
 from server.server import IRCServer
 from server.state import ClientState
+from tests.helpers import start_writer
 
 
 class ReviewFixTests(unittest.TestCase):
@@ -26,11 +28,22 @@ class ReviewFixTests(unittest.TestCase):
                         server.handlers.handle(session.client, message("NICK", nick))
                         server.handlers.handle(session.client, message("USER", "u", "0", "*", nick))
                         server.handlers.handle(session.client, message("JOIN", "#hello"))
+                    drained = threading.Event()
+                    peer_socket.sendall.side_effect = lambda payload: (
+                        drained.set() if payload == b"PING barrier\r\n" else None
+                    )
+                    server.send(peer.client, message("PING", "barrier"))
+                    start_writer(self, peer)
+                    self.addCleanup(sender.close)
+                    self.assertTrue(drained.wait(2))
                     peer_socket.sendall.reset_mock()
+                    delivered = threading.Event()
+                    peer_socket.sendall.side_effect = lambda _payload: delivered.set()
                     params = ("#hello", reason) if command == "PART" else (reason,)
                     incoming = message(command, *params)
                     self.assertLessEqual(len(incoming.to_bytes()), 512)
                     server.handlers.handle(sender.client, incoming)
+                    self.assertTrue(delivered.wait(2))
                     payload = peer_socket.sendall.call_args.args[0]
                     self.assertLessEqual(len(payload), 512)
                     outgoing = IRCMessage.parse(payload.decode("utf-8"))

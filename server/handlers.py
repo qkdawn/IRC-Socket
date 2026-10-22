@@ -87,20 +87,13 @@ class IRCHandlers:
                 client, numerics.ERR_ERRONEUSNICKNAME, nick, "Erroneous nickname"
             )
             return
-        old_prefix = client.prefix
         try:
-            old = self.server.state.set_nick(client, nick)
+            old = self.server.set_nickname(client, nick)
         except NicknameInUseError:
             self.error(
                 client, numerics.ERR_NICKNAMEINUSE, nick, "Nickname is already in use"
             )
             return
-        if old and old != nick:
-            # Other clients identify the old nickname from the message prefix;
-            # the new nickname is carried as the NICK command parameter.
-            self.server.broadcast_user_channels(
-                client, message("NICK", nick, prefix=old_prefix), include_self=True
-            )
         if client.registered and old is None:
             self.welcome(client)
 

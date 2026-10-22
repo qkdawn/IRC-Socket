@@ -5,11 +5,12 @@ from unittest.mock import Mock, patch
 
 from bot.client import BotClient
 from bot.cli import main as bot_main
-from common.irc_message import message
+from common.irc_message import IRCMessage, message
 from server.server import IRCServer
 from server.cli import main as server_main
 from server.state import ClientState
 from server.client_session import ClientSession
+from tests.helpers import start_writer
 
 
 class ConnectionRegressionTests(unittest.TestCase):
@@ -122,7 +123,10 @@ class ConnectionRegressionTests(unittest.TestCase):
         self.server.state.set_nick(session.client, "leaving")
         self.server.state.set_user(session.client, "user", "Real")
         sock.sendall.side_effect = OSError("connection lost during JOIN")
+        worker = start_writer(self, session)
         self.server.handlers.handle(session.client, message("JOIN", "#first,#second"))
+        self.assertTrue(session.closed.wait(2))
+        worker.join(2)
         self.assertNotIn(session.client, self.server.state.clients)
         self.assertIsNone(self.server.state.find_nick("leaving"))
         self.assertEqual(self.server.state.channel_members("#second"), [])
@@ -232,32 +236,34 @@ class ConnectionRegressionTests(unittest.TestCase):
         self.assertEqual(self.server.state.channel_members("#racing"), [])
 
     def test_disconnect_during_join_delivery_cannot_resurrect_bot_membership(self):
-        observer = self.add_client("SuperBot")
+        session = ClientSession(self.server, Mock(), ("::1", 2))
+        observer = session.client
+        self.server.state.add_client(observer)
+        self.server.state.set_nick(observer, "SuperBot")
+        self.server.state.set_user(observer, "u", "Bot")
         joining = self.add_client("bob")
         self.server.state.join(observer, "#hello")
         bot = BotClient()
         bot.state.replace_names("#hello", ["SuperBot"])
         paused = threading.Event()
         resume = threading.Event()
-        errors = []
+        delivered = threading.Event()
+        received = []
 
-        def receive(incoming):
+        def receive(payload):
+            incoming = IRCMessage.parse(payload.decode("utf-8"))
             if incoming.command == "JOIN":
                 paused.set()
                 if not resume.wait(2):
                     raise TimeoutError("JOIN delivery was not resumed")
             bot.handle(incoming)
+            received.append(incoming.command)
+            if incoming.command == "QUIT":
+                delivered.set()
 
-        observer.connection.send.side_effect = receive
-
-        def join():
-            try:
-                self.server.handlers.handle(joining, message("JOIN", "#hello"))
-            except Exception as exc:
-                errors.append(exc)
-
-        worker = threading.Thread(target=join)
-        worker.start()
+        session.socket.sendall.side_effect = receive
+        start_writer(self, session)
+        self.server.handlers.handle(joining, message("JOIN", "#hello"))
         try:
             self.assertTrue(paused.wait(2))
             self.server.disconnect(joining, "Ping timeout")
@@ -265,14 +271,65 @@ class ConnectionRegressionTests(unittest.TestCase):
             joining.connection.close.assert_called_once()
         finally:
             resume.set()
-            worker.join(timeout=2)
-        self.assertFalse(worker.is_alive())
-        self.assertEqual(errors, [])
+        self.assertTrue(delivered.wait(2))
         self.assertEqual(bot.state.members("#hello"), {"SuperBot"})
         self.assertEqual(self.server.state.channel_members("#hello"), [observer])
         self.assertEqual(
-            [call.args[0].command for call in observer.connection.send.call_args_list],
+            received,
             ["JOIN", "QUIT"],
+        )
+
+    def test_rename_disconnect_keeps_the_old_name_from_becoming_a_ghost(self):
+        observer = self.add_client("SuperBot")
+        renaming = self.add_client("bob")
+        for client in (observer, renaming):
+            self.server.state.join(client, "#hello")
+        bot = BotClient()
+        bot.state.replace_names("#hello", ["SuperBot", "bob"])
+        observer.connection.send.side_effect = bot.handle
+        paused, resume = threading.Event(), threading.Event()
+        original_set_nick = self.server.state.set_nick
+        errors = []
+
+        def set_nick(client, nickname):
+            old = original_set_nick(client, nickname)
+            paused.set()
+            if not resume.wait(2):
+                raise TimeoutError("rename was not resumed")
+            return old
+
+        def rename():
+            try:
+                self.server.handlers.handle(renaming, message("NICK", "robert"))
+            except Exception as exc:
+                errors.append(exc)
+
+        def disconnect():
+            try:
+                self.server.disconnect(renaming, "Ping timeout")
+            except Exception as exc:
+                errors.append(exc)
+
+        with patch.object(self.server.state, "set_nick", side_effect=set_nick):
+            worker = threading.Thread(target=rename)
+            worker.start()
+            try:
+                self.assertTrue(paused.wait(2))
+                closer = threading.Thread(target=disconnect)
+                closer.start()
+                # Synchronize the contender without relying on a scheduling delay.
+                resume.set()
+                closer.join(2)
+            finally:
+                resume.set()
+                worker.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(closer.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(bot.state.members("#hello"), {"SuperBot"})
+        self.assertEqual(
+            [call.args[0].command for call in observer.connection.send.call_args_list],
+            ["NICK", "QUIT"],
         )
 
     def test_session_closed_before_read_loop_still_cleans_state(self):

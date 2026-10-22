@@ -1,4 +1,4 @@
-# Quality review, 22 October 2026
+# Quality review, 23 October 2026
 
 The review used the review, health and ai-slop-cleaner workflows to examine the
 protocol boundaries, connection lifecycle, concurrent state, Bot membership
@@ -20,9 +20,13 @@ updates, error handling, documentation wording and packaged runtime sources.
 - Maximum-length PING tokens are preserved in bounded PONG replies.
 - Disconnected clients cannot restore nickname or channel indexes. Heartbeat
   decisions and PONG updates use the shared state lock.
-- JOIN changes and notifications are enqueued atomically with disconnect/QUIT
-  ordering. Socket delivery drains the FIFO outside the state lock, preserving
-  JOIN-before-QUIT even when disconnect occurs during notification delivery.
+- JOIN and NICK changes and notifications are enqueued atomically with
+  disconnect/QUIT ordering. Independent session writers preserve JOIN/NICK
+  before QUIT, preventing ghost old nicknames in the Bot's roster.
+  Each session has a bounded 256-message queue; slow sockets cannot block
+  healthy recipients. Overflow and write failures remove only the failed
+  session. PING deadlines begin when the writer starts the probe, with the
+  timestamp set before socket I/O to handle an immediate PONG correctly.
   ISON `263` replies finish failed batches, allowing retry without a spurious
   timeout/reconnect after the remaining replies arrive.
 - NAMES snapshots retain interleaved membership events. Serialization preserves
@@ -74,8 +78,8 @@ updates, error handling, documentation wording and packaged runtime sources.
 
 ## Verification
 
-- Windows `python -m pytest -q`: 146 tests and 79 subtests passed.
-- Windows `python -m unittest discover -q`: 146 tests passed.
+- Windows `python -m pytest -q`: 152 tests and 79 subtests passed.
+- Windows `python -m unittest discover -q`: 152 tests passed.
 - Before the criterion I extension, Ubuntu WSL2 `python3 -m unittest discover`
   passed the then-current 106 tests; it has not been rerun for this extension.
 - `ruff check .` and `git diff --check`: passed.

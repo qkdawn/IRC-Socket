@@ -63,6 +63,7 @@ class RubricAlignmentTests(unittest.TestCase):
         server.monotonic = lambda: 30
         server._check_idle_clients()
         self.assertEqual(connection.send.call_args.args[0].command, 'PING')
+        server.state.start_ping(client, server.monotonic())
         server.monotonic = lambda: 61
         server._check_idle_clients()
         self.assertIsNone(server.state.find_nick('alice'))
@@ -75,6 +76,7 @@ class RubricAlignmentTests(unittest.TestCase):
         server.state.add_client(client)
         server.monotonic = lambda: 30
         server._check_idle_clients()
+        server.state.start_ping(client, server.monotonic())
         server.handlers.handle(client, message('PONG', 'irc.local'))
         server.monotonic = lambda: 61
         server._check_idle_clients()
@@ -87,6 +89,7 @@ class RubricAlignmentTests(unittest.TestCase):
         server.state.add_client(client)
         server.monotonic = lambda: 30
         server._check_idle_clients()
+        server.state.start_ping(client, server.monotonic())
         server.monotonic = lambda: 45
         server.handlers.handle(client, message('PONG', 'wrong-token'))
         server.handlers.handle(client, message('PING', 'still-here'))

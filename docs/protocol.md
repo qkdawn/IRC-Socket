@@ -52,7 +52,13 @@ A matching PONG must arrive within another 30 seconds. Registration or PONG
 timeouts close the socket and trigger reconnection after the configured delay
 (3 seconds by default). Unrelated traffic does not extend either deadline.
 The server uses the same 30-second idle and 30-second PONG deadlines and only
-accepts a matching PONG. The Bot budgets ISON batches for both request and reply
+accepts a matching PONG. Its PONG deadline begins when the client's writer
+starts sending the probe; waiting in the output queue does not consume that
+deadline or generate duplicate probes. Each client has an independent output
+queue capped at 256 pending messages. Queue overflow or a socket write failure
+(including the one-second socket timeout) disconnects that client and releases
+its routes, allowing other clients to continue receiving messages.
+The Bot budgets ISON batches for both request and reply
 lengths. ISON errors produce an unavailable result after all batches finish;
 missing replies trigger reconnection after 30 seconds to discard stale replies.
 Invalid Bot nicknames use `SuperBot`; invalid channel settings fail before connection.

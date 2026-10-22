@@ -2,7 +2,7 @@
 
 `common` contains only protocol concerns: `IRCMessage` models one IRC message and `IRCStreamDecoder` handles TCP fragmentation, coalescing, UTF-8 and CRLF framing.
 
-`server` separates the accept loop (`server.py`), one connection (`client_session.py`), shared state (`state.py`), and command behavior (`handlers.py`). Mutable indexes are protected by `IRCState.lock`. Socket writes go through `ClientSession.send`, which serializes concurrent writers.
+`server` separates the accept loop (`server.py`), one connection (`client_session.py`), shared state (`state.py`), and command behavior (`handlers.py`). Mutable indexes are protected by `IRCState.lock`. `ClientSession.send` enqueues bounded output; a dedicated writer thread sends each client's messages in order.
 
 `interfaces.py` defines structural `ClientConnection` and `HandlerServer`
 contracts. `ClientState.connection` declares the send/close operations instead
@@ -23,12 +23,18 @@ notifying peers. Send failures queue further QUIT notifications for iterative
 delivery, so a channel-wide connection failure cannot recurse through every
 disconnected user. Healthy peers receive one notification per departure even
 when they share multiple channels.
-JOIN state changes and their notifications enter the server's outgoing FIFO
-under the same state lock used by disconnect cleanup and QUIT enqueueing.
-A single active sender drains the FIFO outside that lock; concurrent sends
-append without waiting for peer writes. A disconnect can therefore close a
-socket immediately while its QUIT stays behind the earlier JOIN. Handler JOIN
-operations use `IRCServer.join_channel()` to preserve this ordering.
+JOIN and NICK state changes and their notifications enter each recipient's
+queue under the same state lock used by disconnect cleanup and QUIT enqueueing.
+Handlers use `IRCServer.join_channel()` and `set_nickname()` to preserve this
+ordering. A subsequent QUIT therefore follows the earlier JOIN or NICK, keeping
+the Bot's roster consistent with server state.
+Each session holds at most 256 pending messages and writes outside the state
+lock. A slow socket cannot stall another client's delivery. Queue overflow or
+a socket write failure closes that session and removes its routes; close also
+wakes an idle writer and discards pending output. Server PING deadlines start
+when the writer takes the probe, before socket I/O so a fast PONG cannot race
+the timestamp. A queued probe suppresses duplicate probes without starting a
+PONG timeout.
 
 `bot` separates transport/event coordination (`client.py`), query workflows
 (`queries.py`), channel membership (`state.py`) and command decisions
