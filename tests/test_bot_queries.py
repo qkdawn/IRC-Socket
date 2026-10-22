@@ -36,6 +36,29 @@ class BotQueryTests(unittest.TestCase):
             [message("ISON", "SuperBot")],
         )
 
+    def test_ison_ignores_replies_and_errors_for_other_recipients(self):
+        for reply in (
+            message("303", "other", "wrong"),
+            message("263", "other", "ISON", "Throttled"),
+            message("417", "other", "ISON", "Too long"),
+            message("421", "other", "ISON", "Unknown command"),
+            message("461", "other", "ISON", "Missing parameters"),
+        ):
+            with self.subTest(command=reply.command):
+                self.queries.reset()
+                self.queries.start_who(
+                    "#room", {"alice"}, "SuperBot", "irc.local", 100
+                )
+                self.assertIsNone(self.queries.handle(reply, "SuperBot"))
+                self.assertEqual(self.queries._who_pending, 1)
+        self.assertEqual(
+            self.queries.handle(message("303", "superbot", "alice"), "SuperBot"),
+            [
+                message("PRIVMSG", "#room", "WHO member: alice"),
+                message("PRIVMSG", "#room", "WHO complete: 1 members"),
+            ],
+        )
+
     def test_query_deadline_is_driven_by_supplied_time(self):
         for query in ("ISON", "LIST", "LUSERS"):
             with self.subTest(query=query):

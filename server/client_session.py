@@ -39,6 +39,7 @@ class ClientSession:
             self.MAX_PENDING_MESSAGES
         )
         self._writer: threading.Thread | None = None
+        self._error_sent = False
 
     def start(self) -> None:
         with self.server.state.lock:
@@ -92,6 +93,10 @@ class ClientSession:
                     # Set before sendall so a fast PONG cannot beat this update.
                     self.server.state.start_ping(self.client, self.server.monotonic())
                 self.socket.sendall(payload)
+                if msg.command == "ERROR":
+                    with self.send_lock:
+                        self._error_sent = True
+                        self.send_lock.notify_all()
         except (ConnectionError, OSError) as exc:
             logger.info("IRC write failed for %s: %s", self.address, exc)
             self.server.disconnect(self.client, "Connection lost")
@@ -122,6 +127,11 @@ class ClientSession:
                 except IRCStreamError as exc:
                     logger.warning("Malformed IRC input from %s: %s", self.address, exc)
                     self.server.send_error_line(self.client, "Malformed IRC line")
+                    with self.send_lock:
+                        self.send_lock.wait_for(
+                            lambda: self._error_sent or self.closed.is_set(),
+                            timeout=self.OUTPUT_QUEUE_TIMEOUT,
+                        )
                     break
                 for incoming in messages:
                     if self.closed.is_set():

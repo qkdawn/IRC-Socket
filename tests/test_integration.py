@@ -55,6 +55,35 @@ class IntegrationTests(unittest.TestCase):
         self.wait_for(requester, lambda incoming: incoming.command == "PONG")
         self.assertFalse(client.disconnected)
 
+    def test_large_names_response_finishes_without_disconnect(self):
+        requester = self.connect("query")
+        self.wait_for(requester, lambda incoming: incoming.command == "004")
+        client = self.server.state.find_nick("query")
+        expected = {f"#channel{index:04d}" for index in range(1000)}
+        for channel in expected:
+            self.server.state.join(client, channel)
+        requester.sendall(b"NAMES\r\n")
+        completed = set()
+        for _ in expected:
+            reply = self.wait_for(requester, lambda incoming: incoming.command == "366")
+            completed.add(reply.params[1])
+        self.assertEqual(completed, expected)
+        entries = [msg for msg in self.pending[requester] if msg.command == "353"]
+        self.assertEqual(len(entries), 1000)
+        self.assertEqual({msg.params[2] for msg in entries}, expected)
+        self.assertTrue(all(msg.params[-1] == "query" for msg in entries))
+        requester.sendall(b"PING :after-names\r\n")
+        self.wait_for(requester, lambda incoming: incoming.command == "PONG")
+        self.assertFalse(client.disconnected)
+
+    def test_malformed_input_receives_error_before_connection_closes(self):
+        requester = self.connect("malformed")
+        self.wait_for(requester, lambda incoming: incoming.command == "004")
+        requester.sendall(b"PING :bad\x00token\r\n")
+        reply = self.wait_for(requester, lambda incoming: incoming.command == "ERROR")
+        self.assertEqual(reply.params[-1], "Malformed IRC line")
+        self.assertEqual(requester.recv(4096), b"")
+
     def test_long_ison_request_keeps_client_connected(self):
         requester = self.connect("q" * 30)
         nick = "n" + "x" * 29

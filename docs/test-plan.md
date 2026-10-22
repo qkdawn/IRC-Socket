@@ -41,6 +41,11 @@ JOIN and that the Bot retains the replacement user. A real IPv6 test reads all
 Queue tests verify that LIST waits for bounded output space without blocking
 another client's PONG, preserves all entries in order, disconnects a stalled
 producer after its deadline, and wakes a waiting producer on close.
+A real IPv6 NAMES test receives complete 353/366 responses for 1,000 channels
+and verifies the connection still answers PING. Malformed-input integration
+checks ERROR delivery before EOF; writer tests verify cleanup even when ERROR
+stalls or fails. ISON tests ignore results and errors for other recipients,
+then accept a reply addressed to an IRC-equivalent spelling of the Bot's nick.
 Bot readiness regressions cover membership commands before its own JOIN and
 between NAMES chunks, automatic execution after 366, unrelated-channel replies,
 queue saturation, the NAMES deadline, and stale-command removal on reconnect.

@@ -234,11 +234,14 @@ class IRCHandlers:
                 current.append(name)
         chunks.append(" ".join(current))
         for chunk in chunks:
+            if getattr(client, "disconnected", False):
+                return
             self.server.send(
                 client,
                 message(
                     numerics.RPL_NAMREPLY, nick, "=", channel, chunk, prefix=prefix
                 ),
+                wait_for_space=True,
             )
         self.server.send(
             client,
@@ -249,6 +252,7 @@ class IRCHandlers:
                 "End of /NAMES list.",
                 prefix=prefix,
             ),
+            wait_for_space=True,
         )
 
     def cmd_privmsg(self, client, params: tuple[str, ...]) -> None:

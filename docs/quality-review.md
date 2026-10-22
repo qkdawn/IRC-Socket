@@ -26,14 +26,18 @@ updates, error handling, documentation wording and packaged runtime sources.
   Each session has a bounded 256-message queue; slow sockets cannot block
   healthy recipients. PART is queued before a replacement user's JOIN when
   a nickname is reused, preventing a late PART from removing that user in
-  the Bot's roster. LIST production waits up to one second for queue space
-  outside the state lock, so a valid 1,000-channel listing completes for a
-  reading client. Stalled queues and write failures remove only the failed
+  the Bot's roster. LIST and NAMES production waits up to one second for queue
+  space outside the state lock, so valid queries for 1,000 channels complete
+  for a reading client. Stalled queues and write failures remove only the failed
   session; close wakes waiting producers. PING deadlines begin when the writer
   starts the probe, with the timestamp set before socket I/O to handle an
   immediate PONG correctly.
   ISON `263` replies finish failed batches, allowing retry without a spurious
   timeout/reconnect after the remaining replies arrive.
+- Malformed input waits up to one second for ERROR delivery before closing;
+  write failure, stalled output and concurrent closure still release the session.
+- Query replies and errors require an IRC-equivalent recipient nickname,
+  preventing a misaddressed ISON response from completing the Bot's query.
 - NAMES snapshots retain interleaved membership events. Serialization preserves
   trailing whitespace and rejects embedded CR, LF and NUL.
 - Invalid configuration fails before networking; empty or unreadable facts files
@@ -83,8 +87,8 @@ updates, error handling, documentation wording and packaged runtime sources.
 
 ## Verification
 
-- Windows `python -m pytest -q`: 157 tests and 79 subtests passed.
-- Windows `python -m unittest discover -q`: 157 tests passed.
+- Windows `python -m pytest -q`: 161 tests and 86 subtests passed.
+- Windows `python -m unittest discover -q`: 161 tests passed.
 - Before the criterion I extension, Ubuntu WSL2 `python3 -m unittest discover`
   passed the then-current 106 tests; it has not been rerun for this extension.
 - `ruff check .` and `git diff --check`: passed.
@@ -108,6 +112,10 @@ updates, error handling, documentation wording and packaged runtime sources.
 - Before the criterion I extension, a bounded matrix of 1,020 valid serialized
   command/parameter combinations produced no unexpected handler exceptions.
   This is not exhaustive fuzzing or evidence for the new command handlers.
+- A current bounded matrix of 826 valid serialized command/parameter combinations
+  across the supported handlers and unknown-command errors produced no unexpected
+  exceptions. Output checks used the same length/truncation policy as sessions.
+  This is a sampled boundary check, not exhaustive fuzzing.
 - Before the criterion I extension, Ubuntu WSL2 / Python 3.12.3: 60 paced IPv6 loopback traffic rounds and 60
   pidstat samples per process passed. Server average CPU was 0.3333%, Bot average
   0.1333%; both peaked at 2%. These are historical measurements, not CPU

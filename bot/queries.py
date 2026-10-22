@@ -102,7 +102,12 @@ class BotQueries:
 
     def handle(self, incoming: IRCMessage, nickname: str) -> list[IRCMessage] | None:
         """Return outgoing messages, or None when this is not a query reply."""
-        outgoing = self._handle_extra_reply(incoming, nickname)
+        if (
+            not incoming.params
+            or irc_casefold(incoming.params[0]) != irc_casefold(nickname)
+        ):
+            return None
+        outgoing = self._handle_extra_reply(incoming)
         if outgoing is not None:
             return outgoing
         if (
@@ -143,11 +148,8 @@ class BotQueries:
     def _handle_extra_reply(
         self,
         incoming: IRCMessage,
-        nickname: str,
     ) -> list[IRCMessage] | None:
         params = incoming.params
-        if not params or irc_casefold(params[0]) != irc_casefold(nickname):
-            return None
         if incoming.command in {"263", "421", "461"} and len(params) >= 2:
             query = params[1].upper()
             pending = self._extra_queries.pop(query, None)

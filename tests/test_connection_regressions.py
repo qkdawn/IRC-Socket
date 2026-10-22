@@ -20,7 +20,7 @@ class ConnectionRegressionTests(unittest.TestCase):
 
     def add_client(self, nick, *, registered=True):
         connection = Mock()
-        connection.send.side_effect = lambda reply: reply.to_bounded_bytes()
+        connection.send.side_effect = lambda reply, **_kwargs: reply.to_bounded_bytes()
         client = ClientState(connection, ("::1", 1))
         self.server.state.add_client(client)
         self.server.state.set_nick(client, nick)

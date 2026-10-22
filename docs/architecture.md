@@ -31,8 +31,8 @@ and an old user's PART precedes a replacement user's JOIN even when the
 nickname is reused, keeping the Bot's roster consistent with server state.
 Each session holds at most 256 pending messages and writes outside the state
 lock. A slow socket cannot stall another client's delivery. Queue overflow or
-a socket write failure closes that session and removes its routes. LIST reply
-production uses `send(..., wait_for_space=True)` outside the state lock: it
+a socket write failure closes that session and removes its routes. LIST and
+NAMES reply production uses `send(..., wait_for_space=True)` outside the state lock: it
 waits up to one second for each queue slot instead of treating a full reply
 queue as an immediate connection failure. The writer signals available slots;
 the condition wait releases the session lock, so close can wake the producer.
@@ -41,6 +41,9 @@ Close also wakes an idle writer and discards pending output. Server PING
 deadlines start when the writer takes the probe, before socket I/O so a fast
 PONG cannot race the timestamp. A queued probe suppresses duplicate probes
 without starting a PONG timeout.
+On malformed input, the session waits at most one second for the writer to
+send ERROR before closing. A write failure or concurrent close wakes that
+wait; a stalled peer still has a bounded cleanup path.
 
 `bot` separates transport/event coordination (`client.py`), query workflows
 (`queries.py`), channel membership (`state.py`) and command decisions

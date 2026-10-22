@@ -10,7 +10,7 @@ class DummyConnection:
     def __init__(self):
         self.messages = []
 
-    def send(self, _message):
+    def send(self, _message, *, wait_for_space=False):
         self.messages.append(_message)
 
     def close(self):

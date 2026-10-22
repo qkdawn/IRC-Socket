@@ -19,7 +19,9 @@ registered spelling. The complete reply, including prefix and CRLF, must fit
 within 512 bytes. If the requested online names cannot fit, the server sends one
 `417 ISON` error instead of a partial presence list; clients should retry with a
 smaller batch. This is a local error extension and retains one response per
-request. The Bot recognizes `263`, `417`, `421` and `461` for ISON, discards
+request. The Bot checks the reply recipient with IRC casemapping before
+accepting ISON, LIST or LUSERS results and errors. It recognizes `263`, `417`,
+`421` and `461` for ISON, discards
 partial results from failed queries, and drains outstanding batches before
 allowing another query. A `263 ISON` rejection completes that batch as a failure
 instead of waiting for a query timeout and reconnecting.
@@ -55,13 +57,16 @@ The server uses the same 30-second idle and 30-second PONG deadlines and only
 accepts a matching PONG. Its PONG deadline begins when the client's writer
 starts sending the probe; waiting in the output queue does not consume that
 deadline or generate duplicate probes. Each client has an independent output
-queue capped at 256 pending messages. LIST replies wait up to one second for a
-queue slot, allowing large lists to drain without disconnecting a reading
-client. The wait holds no server state lock; other clients continue receiving
-messages. A LIST queue that does not drain, overflow from other output, or a
+queue capped at 256 pending messages. LIST and NAMES replies wait up to one
+second for a queue slot, allowing large responses to drain without disconnecting
+a reading client. The wait holds no server state lock; other clients continue receiving
+messages. A reply queue that does not drain, overflow from other output, or a
 socket write failure (including the one-second socket timeout) disconnects
 that client and releases its routes. Closing a connection wakes any producer
 waiting for space immediately.
+Malformed input queues an ERROR notice and waits up to one second for its
+socket write before closing. A failed write or concurrent close ends the wait;
+an unresponsive peer cannot hold the session indefinitely.
 The Bot budgets ISON batches for both request and reply
 lengths. ISON errors produce an unavailable result after all batches finish;
 missing replies trigger reconnection after 30 seconds to discard stale replies.

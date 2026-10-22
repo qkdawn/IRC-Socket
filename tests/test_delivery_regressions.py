@@ -249,6 +249,29 @@ class DeliveryRegressionTests(unittest.TestCase):
         self.assertEqual(session._outgoing.qsize(), 1)
         self.assertIsNone(session._outgoing.get_nowait())
 
+    def test_malformed_input_cleanup_survives_stalled_or_failed_error_writes(self):
+        for failure in ("stalled", "failed"):
+            with self.subTest(failure=failure):
+                session = self.session(failure)
+                session.OUTPUT_QUEUE_TIMEOUT = 0.05
+                session.socket.recv.return_value = b"PING :bad\x00token\r\n"
+                release = threading.Event()
+
+                def write(_payload):
+                    if failure == "failed":
+                        raise OSError("peer stopped reading")
+                    if not release.wait(2):
+                        raise TimeoutError("error writer was not released by close")
+
+                session.socket.sendall.side_effect = write
+                session.socket.shutdown.side_effect = lambda *_args: release.set()
+                with self.assertLogs("server.client_session", level="WARNING"):
+                    session.run()
+                self.assertTrue(session.closed.is_set())
+                self.assertIsNone(self.server.state.find_nick(failure))
+                self.assertFalse(session._writer.is_alive())
+                session.socket.close.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
