@@ -186,8 +186,7 @@ class IRCHandlers:
                     client, numerics.ERR_NOSUCHCHANNEL, channel, "No such channel"
                 )
                 continue
-            parted, members = self.server.state.part(client, channel)
-            if not parted:
+            if not self.server.part_channel(client, channel, reason):
                 self.error(
                     client,
                     numerics.ERR_NOTONCHANNEL,
@@ -195,9 +194,6 @@ class IRCHandlers:
                     "You are not on that channel",
                 )
                 continue
-            self.server.send_many(
-                members, message("PART", channel, reason, prefix=client.prefix)
-            )
 
     def cmd_names(self, client, params: tuple[str, ...]) -> None:
         channels = (
@@ -353,12 +349,15 @@ class IRCHandlers:
     def cmd_list(self, client, params: tuple[str, ...]) -> None:
         requested = params[0].split(",") if params else None
         for name, count in self.server.state.list_channels(requested):
+            if client.disconnected:
+                return
             self.server.send(
                 client,
                 message(
                     numerics.RPL_LIST, client.nick, name, str(count), "",
                     prefix=self.server.server_name,
                 ),
+                wait_for_space=True,
             )
         self.server.send(
             client,
@@ -366,6 +365,7 @@ class IRCHandlers:
                 numerics.RPL_LISTEND, client.nick, "End of /LIST",
                 prefix=self.server.server_name,
             ),
+            wait_for_space=True,
         )
 
     def cmd_lusers(self, client, params: tuple[str, ...]) -> None:

@@ -38,6 +38,23 @@ class IntegrationTests(unittest.TestCase):
         self.pending[sock] = []
         return sock
 
+    def test_large_list_is_complete_and_keeps_a_reading_client_connected(self):
+        requester = self.connect("query")
+        self.wait_for(requester, lambda incoming: incoming.command == "004")
+        client = self.server.state.find_nick("query")
+        expected = {f"#channel{index:04d}" for index in range(1000)}
+        for channel in expected:
+            self.server.state.join(client, channel)
+        requester.sendall(b"LIST\r\n")
+        self.wait_for(requester, lambda incoming: incoming.command == "323")
+        entries = [msg for msg in self.pending[requester] if msg.command == "322"]
+        self.assertEqual(len(entries), 1000)
+        self.assertEqual({msg.params[1] for msg in entries}, expected)
+        self.assertTrue(all(msg.params[2] == "1" for msg in entries))
+        requester.sendall(b"PING :after-list\r\n")
+        self.wait_for(requester, lambda incoming: incoming.command == "PONG")
+        self.assertFalse(client.disconnected)
+
     def test_long_ison_request_keeps_client_connected(self):
         requester = self.connect("q" * 30)
         nick = "n" + "x" * 29

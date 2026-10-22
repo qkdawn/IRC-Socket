@@ -2,7 +2,7 @@
 
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from common.irc_message import IRCMessage, message
 from server.client_session import ClientSession
@@ -148,6 +148,106 @@ class DeliveryRegressionTests(unittest.TestCase):
         with self.assertRaises(ConnectionError):
             session.send(message("NOTICE", "closing", "late"))
         session.socket.sendall.assert_not_called()
+
+    def test_list_waits_for_space_without_blocking_another_client(self):
+        listing = self.session("listing")
+        healthy = self.session("healthy")
+        channels = [f"#channel{index:04d}" for index in range(1000)]
+        for channel in channels:
+            self.server.state.join(listing.client, channel)
+        entered, release, _worker = self.block_writer(listing)
+        self.server.send(listing.client, message("NOTICE", "listing", "first"))
+        self.assertTrue(entered.wait(2))
+        waiting, finished, answered = (threading.Event() for _ in range(3))
+        received = []
+
+        def receive(payload):
+            incoming = IRCMessage.parse(payload.decode())
+            received.append(incoming)
+            if incoming.command == "323":
+                finished.set()
+
+        listing.socket.sendall.side_effect = receive
+        healthy.socket.sendall.side_effect = lambda _payload: answered.set()
+        start_writer(self, healthy)
+        original_wait = listing.send_lock.wait
+
+        def wait(timeout):
+            waiting.set()
+            return original_wait(timeout)
+
+        errors = []
+
+        def produce():
+            try:
+                self.server.handlers.handle(listing.client, message("LIST"))
+            except Exception as exc:
+                errors.append(exc)
+
+        with patch.object(listing.send_lock, "wait", side_effect=wait):
+            producer = threading.Thread(target=produce)
+            producer.start()
+            try:
+                self.assertTrue(waiting.wait(2))
+                self.assertLessEqual(
+                    listing._outgoing.qsize(), listing.MAX_PENDING_MESSAGES
+                )
+                self.server.handlers.handle(healthy.client, message("PING", "independent"))
+                self.assertTrue(answered.wait(2))
+                self.assertFalse(listing.client.disconnected)
+                self.assertFalse(release.is_set())
+            finally:
+                release.set()
+                producer.join(2)
+        self.assertFalse(producer.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue(finished.wait(2))
+        self.assertEqual([msg.params[1] for msg in received[:-1]], channels)
+        self.assertEqual(received[-1].command, "323")
+        self.assertFalse(listing.client.disconnected)
+
+    def test_stalled_list_queue_times_out_and_releases_the_nickname(self):
+        session = self.session("stalled")
+        session.OUTPUT_QUEUE_TIMEOUT = 0.05
+        self.server.state.join(session.client, "#hello")
+        for _ in range(session.MAX_PENDING_MESSAGES):
+            session.send(message("NOTICE", "stalled", "queued"))
+        with patch.object(session.send_lock, "wait", wraps=session.send_lock.wait) as wait:
+            self.server.handlers.handle(session.client, message("LIST"))
+        self.assertTrue(wait.called)
+        self.assertTrue(session.closed.is_set())
+        self.assertTrue(session.client.disconnected)
+        self.assertIsNone(self.server.state.find_nick("stalled"))
+        self.assertEqual(self.server.state.channel_members("#hello"), [])
+
+    def test_close_wakes_a_reply_producer_waiting_for_space(self):
+        session = self.session("closing")
+        for _ in range(session.MAX_PENDING_MESSAGES):
+            session.send(message("NOTICE", "closing", "queued"))
+        waiting = threading.Event()
+        original_wait = session.send_lock.wait
+
+        def wait(timeout):
+            waiting.set()
+            return original_wait(timeout)
+
+        with patch.object(session.send_lock, "wait", side_effect=wait):
+            producer = threading.Thread(
+                target=self.server.send,
+                args=(session.client, message("323", "closing", "End of /LIST")),
+                kwargs={"wait_for_space": True},
+            )
+            producer.start()
+            try:
+                self.assertTrue(waiting.wait(2))
+                self.server.disconnect(session.client)
+            finally:
+                session.close()
+                producer.join(2)
+        self.assertFalse(producer.is_alive())
+        self.assertTrue(session.client.disconnected)
+        self.assertEqual(session._outgoing.qsize(), 1)
+        self.assertIsNone(session._outgoing.get_nowait())
 
 
 if __name__ == "__main__":

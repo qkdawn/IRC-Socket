@@ -20,13 +20,18 @@ updates, error handling, documentation wording and packaged runtime sources.
 - Maximum-length PING tokens are preserved in bounded PONG replies.
 - Disconnected clients cannot restore nickname or channel indexes. Heartbeat
   decisions and PONG updates use the shared state lock.
-- JOIN and NICK changes and notifications are enqueued atomically with
+- JOIN, NICK and PART changes and notifications are enqueued atomically with
   disconnect/QUIT ordering. Independent session writers preserve JOIN/NICK
   before QUIT, preventing ghost old nicknames in the Bot's roster.
   Each session has a bounded 256-message queue; slow sockets cannot block
-  healthy recipients. Overflow and write failures remove only the failed
-  session. PING deadlines begin when the writer starts the probe, with the
-  timestamp set before socket I/O to handle an immediate PONG correctly.
+  healthy recipients. PART is queued before a replacement user's JOIN when
+  a nickname is reused, preventing a late PART from removing that user in
+  the Bot's roster. LIST production waits up to one second for queue space
+  outside the state lock, so a valid 1,000-channel listing completes for a
+  reading client. Stalled queues and write failures remove only the failed
+  session; close wakes waiting producers. PING deadlines begin when the writer
+  starts the probe, with the timestamp set before socket I/O to handle an
+  immediate PONG correctly.
   ISON `263` replies finish failed batches, allowing retry without a spurious
   timeout/reconnect after the remaining replies arrive.
 - NAMES snapshots retain interleaved membership events. Serialization preserves
@@ -78,8 +83,8 @@ updates, error handling, documentation wording and packaged runtime sources.
 
 ## Verification
 
-- Windows `python -m pytest -q`: 152 tests and 79 subtests passed.
-- Windows `python -m unittest discover -q`: 152 tests passed.
+- Windows `python -m pytest -q`: 157 tests and 79 subtests passed.
+- Windows `python -m unittest discover -q`: 157 tests passed.
 - Before the criterion I extension, Ubuntu WSL2 `python3 -m unittest discover`
   passed the then-current 106 tests; it has not been rerun for this extension.
 - `ruff check .` and `git diff --check`: passed.

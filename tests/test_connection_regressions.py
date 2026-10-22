@@ -343,6 +343,67 @@ class ConnectionRegressionTests(unittest.TestCase):
         self.assertIsNone(self.server.state.find_nick("closing"))
         sock.close.assert_called_once()
 
+    def test_part_finishes_before_a_replacement_nickname_joins(self):
+        observer = self.add_client("SuperBot")
+        leaving = self.add_client("bob")
+        for client in (observer, leaving):
+            self.server.state.join(client, "#hello")
+        bot = BotClient()
+        bot.state.replace_names("#hello", ["SuperBot", "bob"])
+        observer.connection.send.side_effect = bot.handle
+        parted, resume = threading.Event(), threading.Event()
+        attempting, replaced = threading.Event(), threading.Event()
+        errors = []
+        original_part = self.server.state.part
+
+        def part(client, channel):
+            result = original_part(client, channel)
+            parted.set()
+            if not resume.wait(2):
+                raise TimeoutError("PART was not resumed")
+            return result
+
+        def leave():
+            try:
+                self.server.handlers.handle(leaving, message("PART", "#hello"))
+            except Exception as exc:
+                errors.append(exc)
+
+        def replace():
+            try:
+                attempting.set()
+                self.server.disconnect(leaving)
+                replacement = self.add_client("bob")
+                self.server.join_channel(replacement, "#hello")
+                replaced.set()
+            except Exception as exc:
+                errors.append(exc)
+
+        with patch.object(self.server.state, "part", side_effect=part):
+            worker = threading.Thread(target=leave)
+            closer = threading.Thread(target=replace)
+            worker.start()
+            try:
+                self.assertTrue(parted.wait(2))
+                closer.start()
+                self.assertTrue(attempting.wait(2))
+                # The old implementation lets the replacement finish in this gap.
+                replaced.wait(0.1)
+            finally:
+                resume.set()
+                worker.join(2)
+                if closer.ident is not None:
+                    closer.join(2)
+        self.assertFalse(worker.is_alive())
+        self.assertFalse(closer.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue(replaced.is_set())
+        self.assertEqual(bot.state.members("#hello"), {"SuperBot", "bob"})
+        self.assertEqual(
+            [call.args[0].command for call in observer.connection.send.call_args_list],
+            ["PART", "JOIN"],
+        )
+
     def test_join_send_failure_is_announced_after_join_to_healthy_peer(self):
         observer = self.add_client("SuperBot")
         joining = self.add_client("bob")

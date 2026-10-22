@@ -6,6 +6,7 @@ import logging
 from queue import Empty, Full, Queue
 import socket
 import threading
+import time
 from typing import TYPE_CHECKING
 
 from common.irc_message import IRCMessage
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 class ClientSession:
     MAX_PENDING_MESSAGES = 256
+    OUTPUT_QUEUE_TIMEOUT = 1.0
 
     def __init__(self, server: IRCServer, sock: socket.socket, address: tuple) -> None:
         self.server = server
@@ -31,7 +33,7 @@ class ClientSession:
             self, address, last_activity=connected_at, connected_at=connected_at
         )
         self.decoder = IRCStreamDecoder()
-        self.send_lock = threading.Lock()
+        self.send_lock = threading.Condition()
         self.closed = threading.Event()
         self._outgoing: Queue[tuple[IRCMessage, bytes] | None] = Queue(
             self.MAX_PENDING_MESSAGES
@@ -56,22 +58,33 @@ class ClientSession:
             )
             raise
 
-    def send(self, msg: IRCMessage) -> None:
+    def send(self, msg: IRCMessage, *, wait_for_space: bool = False) -> None:
         payload = msg.to_bounded_bytes(
             truncate_trailing=msg.command in {"PART", "QUIT", "ERROR"}
         )
+        deadline = time.monotonic() + self.OUTPUT_QUEUE_TIMEOUT
         with self.send_lock:
-            if self.closed.is_set():
-                raise ConnectionError("session is closed")
-            try:
-                self._outgoing.put_nowait((msg, payload))
-            except Full as exc:
-                raise ConnectionError("client output queue is full") from exc
+            while True:
+                if self.closed.is_set():
+                    raise ConnectionError("session is closed")
+                try:
+                    self._outgoing.put_nowait((msg, payload))
+                    return
+                except Full as exc:
+                    if not wait_for_space:
+                        raise ConnectionError("client output queue is full") from exc
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ConnectionError("client output queue did not drain") from exc
+                    # Only a reply producer outside the state lock may wait.
+                    self.send_lock.wait(remaining)
 
     def _write_loop(self) -> None:
         try:
             while not self.closed.is_set():
                 item = self._outgoing.get()
+                with self.send_lock:
+                    self.send_lock.notify_all()
                 if item is None or self.closed.is_set():
                     return
                 msg, payload = item
@@ -139,6 +152,7 @@ class ClientSession:
                 except Empty:
                     break
             self._outgoing.put_nowait(None)
+            self.send_lock.notify_all()
         try:
             self.socket.shutdown(socket.SHUT_RDWR)
         except OSError as exc:

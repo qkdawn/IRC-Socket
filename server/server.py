@@ -81,8 +81,20 @@ class IRCServer:
         finally:
             self.stop()
 
-    def send(self, client: ClientState, msg: IRCMessage) -> None:
-        self.send_many((client,), msg)
+    def send(
+        self, client: ClientState, msg: IRCMessage, *, wait_for_space: bool = False
+    ) -> None:
+        if not wait_for_space:
+            self.send_many((client,), msg)
+            return
+        # Reply producers may wait for their own queue, never under state.lock.
+        if client.disconnected:
+            return
+        try:
+            client.connection.send(msg, wait_for_space=True)
+        except (ConnectionError, OSError) as exc:
+            logger.info("Unable to send to %s: %s", client.address, exc)
+            self.disconnect(client, "Connection lost")
 
     def send_many(self, clients: Iterable[ClientState], msg: IRCMessage) -> None:
         # Connection.send only enqueues; socket writes belong to each session.
@@ -123,6 +135,15 @@ class IRCServer:
                     recipients.update(self.state.channel_members(channel))
                 self.send_many(recipients, message("NICK", nick, prefix=old_prefix))
             return old
+
+    def part_channel(self, client: ClientState, channel: str, reason: str) -> bool:
+        with self.state.lock:
+            parted, members = self.state.part(client, channel)
+            if parted:
+                self.send_many(
+                    members, message("PART", channel, reason, prefix=client.prefix)
+                )
+            return parted
 
     def send_error_line(self, client: ClientState, detail: str) -> None:
         self.send(client, message("ERROR", detail, prefix=self.server_name))

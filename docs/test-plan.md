@@ -35,6 +35,12 @@ roster. Delivery tests block one writer and verify another client's broadcast
 and PONG delivery, isolated cleanup after the 256-message queue fills, and
 idle-writer shutdown. Controlled-clock tests verify that queued PINGs do not
 start deadlines or duplicate probes, and that immediate PONGs clear the probe.
+PART/disconnect/nickname-reuse tests verify that the old PART precedes the new
+JOIN and that the Bot retains the replacement user. A real IPv6 test reads all
+1,000 LIST entries and the 323 terminator, then verifies PING still works.
+Queue tests verify that LIST waits for bounded output space without blocking
+another client's PONG, preserves all entries in order, disconnects a stalled
+producer after its deadline, and wakes a waiting producer on close.
 Bot readiness regressions cover membership commands before its own JOIN and
 between NAMES chunks, automatic execution after 366, unrelated-channel replies,
 queue saturation, the NAMES deadline, and stale-command removal on reconnect.

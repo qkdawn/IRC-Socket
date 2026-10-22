@@ -55,9 +55,13 @@ The server uses the same 30-second idle and 30-second PONG deadlines and only
 accepts a matching PONG. Its PONG deadline begins when the client's writer
 starts sending the probe; waiting in the output queue does not consume that
 deadline or generate duplicate probes. Each client has an independent output
-queue capped at 256 pending messages. Queue overflow or a socket write failure
-(including the one-second socket timeout) disconnects that client and releases
-its routes, allowing other clients to continue receiving messages.
+queue capped at 256 pending messages. LIST replies wait up to one second for a
+queue slot, allowing large lists to drain without disconnecting a reading
+client. The wait holds no server state lock; other clients continue receiving
+messages. A LIST queue that does not drain, overflow from other output, or a
+socket write failure (including the one-second socket timeout) disconnects
+that client and releases its routes. Closing a connection wakes any producer
+waiting for space immediately.
 The Bot budgets ISON batches for both request and reply
 lengths. ISON errors produce an unavailable result after all batches finish;
 missing replies trigger reconnection after 30 seconds to discard stale replies.
