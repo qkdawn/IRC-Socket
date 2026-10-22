@@ -7,7 +7,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 SUBMISSION = ROOT / "submission" / "group_04_midproject"
-ARCHIVE = SUBMISSION.with_suffix(".zip")
+ARCHIVE = ROOT / "submission" / "group_04_source.zip"
 
 
 def main() -> None:

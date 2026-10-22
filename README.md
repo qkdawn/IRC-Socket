@@ -49,7 +49,7 @@ report the Bot's local clock.
 ## Code-only package
 
 Run `python scripts/package_code.py` to rebuild
-`submission/group_04_midproject.zip`. It contains only `bot/`, `common/`,
+`submission/group_04_source.zip`. It contains only `bot/`, `common/`,
 `server/` Python sources and the Bot's `bot/data/facts.txt`. Extract it and run
 the commands above from the folder containing those packages. Documentation,
 assessment forms, logs, tests and caches remain outside this ZIP.
