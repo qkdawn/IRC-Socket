@@ -27,24 +27,51 @@ class ConnectionRegressionTests(unittest.TestCase):
             self.server.state.set_user(client, "user", "Real Name")
         return client
 
-    def test_ison_response_fits_even_when_valid_request_leaves_no_prefix_room(self):
+    def test_ison_overflow_returns_one_error_instead_of_partial_presence(self):
+        self.server.server_name = "s" * 63
         names = [f"n{index:029d}" for index in range(15)]
         for nick in names:
             self.add_client(nick)
         request = message("ISON", " ".join(names))
         self.assertEqual(len(request.to_bytes()), 472)
+        full_reply = message(
+            "303", self.requester.nick, " ".join(names), prefix=self.server.server_name
+        )
+        self.assertEqual(len(full_reply.to_bytes()), 567)
 
         self.server.handlers.handle(self.requester, request)
 
         self.requester.connection.send.assert_called_once()
         reply = self.requester.connection.send.call_args.args[0]
-        self.assertEqual(reply.command, "303")
+        self.assertEqual(reply.command, "417")
+        self.assertEqual(reply.params[1], "ISON")
+        self.assertIn("smaller batches", reply.params[-1])
         self.assertLessEqual(len(reply.to_bounded_bytes()), 512)
-        self.assertEqual(reply.params[-1].split(), names[:14])
         self.server.handlers.handle(self.requester, message("PING", "still-here"))
         self.assertEqual(
             self.requester.connection.send.call_args.args[0].command, "PONG"
         )
+
+    def test_ison_reply_accepts_512_bytes_and_rejects_513_bytes(self):
+        self.server.server_name = "s" * 63
+        names = [f"n{index:029d}" for index in range(13)]
+        for nick in [*names, "short6", "longer7"]:
+            self.add_client(nick)
+        for last, size, command in (("short6", 512, "303"), ("longer7", 513, "417")):
+            with self.subTest(size=size):
+                selected = [*names, last]
+                full_reply = message(
+                    "303", self.requester.nick, " ".join(selected), prefix="s" * 63
+                )
+                self.assertEqual(len(full_reply.to_bytes()), size)
+                self.requester.connection.send.reset_mock()
+                self.server.handlers.cmd_ison(self.requester, (" ".join(selected),))
+                self.requester.connection.send.assert_called_once()
+                reply = self.requester.connection.send.call_args.args[0]
+                self.assertEqual(reply.command, command)
+                self.assertLessEqual(len(reply.to_bounded_bytes()), 512)
+                if command == "303":
+                    self.assertEqual(reply.params[-1].split(), selected)
 
     def test_ison_deduplicates_canonical_nicks_and_returns_empty_reply(self):
         self.add_client("Alice")
@@ -113,6 +140,73 @@ class ConnectionRegressionTests(unittest.TestCase):
         self.assertIsNone(self.server.state.find_nick("ghost"))
         self.assertEqual(self.server.state.channel_members("#ghost"), [])
 
+    def test_server_registration_deadline_ignores_keepalives_and_nickname_changes(self):
+        now = [100.0]
+        with patch.object(self.server, "monotonic", side_effect=lambda: now[0]):
+            session = ClientSession(self.server, Mock(), ("::1", 2))
+            client = session.client
+            self.server.state.add_client(client)
+            self.server.handlers.handle(client, message("NICK", "ReservedNick"))
+            now[0] = 120.0
+            for incoming in (
+                message("PING", "keep-alive"),
+                message("PONG", self.server.server_name),
+                message("NICK", "RenamedReserved"),
+            ):
+                self.server.handlers.handle(client, incoming)
+            self.server._check_idle_clients()
+            self.assertFalse(client.disconnected)
+            now[0] = 130.0
+            self.server._check_idle_clients()
+            self.assertTrue(client.disconnected)
+            self.assertNotIn(client, self.server.state.clients)
+            self.assertIsNone(self.server.state.find_nick("RenamedReserved"))
+            session.socket.close.assert_called_once()
+            self.server.state.set_nick(self.requester, "RenamedReserved")
+            self.assertIs(self.server.state.find_nick("RenamedReserved"), self.requester)
+            for elapsed in range(40, 301, 20):
+                now[0] = 100.0 + elapsed
+                self.server._check_idle_clients()
+            session.socket.close.assert_called_once()
+
+    def test_server_registration_deadline_covers_silent_and_user_only_connections(self):
+        for user_only in (False, True):
+            with self.subTest(user_only=user_only):
+                now = [100.0]
+                with patch.object(self.server, "monotonic", side_effect=lambda: now[0]):
+                    session = ClientSession(self.server, Mock(), ("::1", 2))
+                    client = session.client
+                    self.server.state.add_client(client)
+                    if user_only:
+                        self.server.handlers.handle(
+                            client, message("USER", "user", "0", "*", "Real")
+                        )
+                    now[0] = 129.999
+                    self.server._check_idle_clients()
+                    self.assertFalse(client.disconnected)
+                    now[0] = 130.0
+                    self.server._check_idle_clients()
+                    self.assertTrue(client.disconnected)
+                    self.assertNotIn(client, self.server.state.clients)
+                    session.socket.close.assert_called_once()
+
+    def test_completed_registration_is_exempt_from_registration_deadline(self):
+        now = [100.0]
+        with patch.object(self.server, "monotonic", side_effect=lambda: now[0]):
+            session = ClientSession(self.server, Mock(), ("::1", 2))
+            client = session.client
+            self.server.state.add_client(client)
+            self.server.handlers.handle(client, message("NICK", "Registered"))
+            now[0] = 129.999
+            self.server.handlers.handle(client, message("USER", "u", "0", "*", "Real"))
+            for elapsed in range(40, 301, 20):
+                now[0] = 100.0 + elapsed
+                self.server.handlers.handle(client, message("PING", "keep-alive"))
+                self.server._check_idle_clients()
+            self.assertTrue(client.registered)
+            self.assertFalse(client.disconnected)
+            session.socket.close.assert_not_called()
+
     def test_join_racing_disconnect_cannot_leave_membership_behind(self):
         client = self.add_client("racing")
         barrier = threading.Barrier(2)
@@ -137,6 +231,50 @@ class ConnectionRegressionTests(unittest.TestCase):
         self.assertIsNone(self.server.state.find_nick("racing"))
         self.assertEqual(self.server.state.channel_members("#racing"), [])
 
+    def test_disconnect_during_join_delivery_cannot_resurrect_bot_membership(self):
+        observer = self.add_client("SuperBot")
+        joining = self.add_client("bob")
+        self.server.state.join(observer, "#hello")
+        bot = BotClient()
+        bot.state.replace_names("#hello", ["SuperBot"])
+        paused = threading.Event()
+        resume = threading.Event()
+        errors = []
+
+        def receive(incoming):
+            if incoming.command == "JOIN":
+                paused.set()
+                if not resume.wait(2):
+                    raise TimeoutError("JOIN delivery was not resumed")
+            bot.handle(incoming)
+
+        observer.connection.send.side_effect = receive
+
+        def join():
+            try:
+                self.server.handlers.handle(joining, message("JOIN", "#hello"))
+            except Exception as exc:
+                errors.append(exc)
+
+        worker = threading.Thread(target=join)
+        worker.start()
+        try:
+            self.assertTrue(paused.wait(2))
+            self.server.disconnect(joining, "Ping timeout")
+            self.assertTrue(joining.disconnected)
+            joining.connection.close.assert_called_once()
+        finally:
+            resume.set()
+            worker.join(timeout=2)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(bot.state.members("#hello"), {"SuperBot"})
+        self.assertEqual(self.server.state.channel_members("#hello"), [observer])
+        self.assertEqual(
+            [call.args[0].command for call in observer.connection.send.call_args_list],
+            ["JOIN", "QUIT"],
+        )
+
     def test_session_closed_before_read_loop_still_cleans_state(self):
         sock = Mock()
         session = ClientSession(self.server, sock, ("::1", 2))
@@ -147,6 +285,30 @@ class ConnectionRegressionTests(unittest.TestCase):
         self.assertNotIn(session.client, self.server.state.clients)
         self.assertIsNone(self.server.state.find_nick("closing"))
         sock.close.assert_called_once()
+
+    def test_join_send_failure_is_announced_after_join_to_healthy_peer(self):
+        observer = self.add_client("SuperBot")
+        joining = self.add_client("bob")
+        self.server.state.join(observer, "#hello")
+        bot = BotClient()
+        bot.state.replace_names("#hello", ["SuperBot"])
+        observer.connection.send.side_effect = bot.handle
+        joining.connection.send.side_effect = OSError("connection lost during JOIN")
+        original_join = self.server.state.join
+
+        def join_with_failing_recipient_first(client, channel):
+            joined, _members = original_join(client, channel)
+            return joined, [joining, observer]
+
+        with patch.object(self.server.state, "join", side_effect=join_with_failing_recipient_first):
+            self.server.handlers.handle(joining, message("JOIN", "#hello"))
+        self.assertEqual(
+            [call.args[0].command for call in observer.connection.send.call_args_list],
+            ["JOIN", "QUIT"],
+        )
+        self.assertEqual(bot.state.members("#hello"), {"SuperBot"})
+        self.assertNotIn(joining, self.server.state.clients)
+        joining.connection.close.assert_called_once()
 
     def test_listener_startup_failure_closes_socket(self):
         sock = Mock()
@@ -481,6 +643,23 @@ class BotDeadlineTests(unittest.TestCase):
         self.assertIsNone(bot.queries._who_channel)
         bot.send.reset_mock()
         bot.handle(request)
+        self.assertEqual(bot.send.call_args.args[0].command, "ISON")
+
+    def test_who_throttle_reports_unavailable_without_connection_timeout(self):
+        bot = BotClient()
+        bot.send = Mock()
+        bot._registered = True
+        request = message("PRIVMSG", "#hello", "!who", prefix="alice!u@host")
+        with patch("bot.client.time.monotonic", return_value=100):
+            bot.handle(request)
+        bot.send.reset_mock()
+        bot.handle(message("263", bot.nickname, "ISON", "Try again later"))
+        bot.send.assert_called_once_with(
+            message("PRIVMSG", "#hello", "WHO unavailable: server rejected ISON.")
+        )
+        with patch("bot.client.time.monotonic", return_value=130):
+            bot._check_timeouts(100, None)
+            bot.handle(request)
         self.assertEqual(bot.send.call_args.args[0].command, "ISON")
 
     def test_who_error_drains_other_batches_before_a_new_query(self):

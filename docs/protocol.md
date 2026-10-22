@@ -8,11 +8,21 @@ Local registration policy limits USER usernames to 1-30 printable ASCII characte
 excluding spaces, `!`, `@`, and `:`. Invalid usernames receive `461 USER` and may
 be retried on the same connection. A NICK reserves the nickname immediately, but
 private-message delivery and ISON visibility require completed NICK/USER registration.
+The server requires registration within 30 seconds of connection creation,
+using a monotonic timestamp independent of activity. PING, PONG and nickname
+changes do not extend this deadline. Its one-second monitor closes expired
+unregistered connections and releases their reserved nicknames at the next check.
+Completed registrations continue to use the normal idle/PONG deadlines.
 
 ISON returns one `303` reply per request, with unique online nicknames in their
-registered spelling. The full reply, including prefix and CRLF, fits within 512
-bytes; names at the end that do not fit are omitted at nickname boundaries.
-Clients querying many names should use smaller batches.
+registered spelling. The complete reply, including prefix and CRLF, must fit
+within 512 bytes. If the requested online names cannot fit, the server sends one
+`417 ISON` error instead of a partial presence list; clients should retry with a
+smaller batch. This is a local error extension and retains one response per
+request. The Bot recognizes `263`, `417`, `421` and `461` for ISON, discards
+partial results from failed queries, and drains outstanding batches before
+allowing another query. A `263 ISON` rejection completes that batch as a failure
+instead of waiting for a query timeout and reconnecting.
 
 LIST returns a sorted snapshot of channel names and member counts in `322`
 replies, followed by `323`, including when no channels match. An optional

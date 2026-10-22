@@ -172,14 +172,10 @@ class IRCHandlers:
                     client, numerics.ERR_NOSUCHCHANNEL, channel, "No such channel"
                 )
                 continue
-            joined, members = self.server.state.join(client, channel)
-            if not joined:
+            if not self.server.join_channel(client, channel):
                 continue
             # JOIN is echoed to the joining client as well as existing members;
             # NAMES then supplies the initial roster for clients joining late.
-            self.server.send_many(
-                members, message("JOIN", channel, prefix=client.prefix)
-            )
             if getattr(client, "disconnected", False):
                 return
             self.send_names(client, channel)
@@ -348,13 +344,18 @@ class IRCHandlers:
             target = self.server.state.direct_target(name)
             if target is None or not target.nick or target.nick in seen:
                 continue
-            candidate = " ".join((*names, target.nick))
-            if len(message("303", nick, candidate, prefix=prefix).to_bytes()) > 512:
-                # ISON has one reply per request; omit whole names that do not fit.
-                continue
             names.append(target.nick)
             seen.add(target.nick)
-        self.server.send(client, message("303", nick, " ".join(names), prefix=prefix))
+        reply = message("303", nick, " ".join(names), prefix=prefix)
+        if len(reply.to_bytes()) > 512:
+            self.error(
+                client,
+                numerics.ERR_INPUTTOOLONG,
+                "ISON",
+                "Reply too long; use smaller batches",
+            )
+            return
+        self.server.send(client, reply)
 
     def cmd_list(self, client, params: tuple[str, ...]) -> None:
         requested = params[0].split(",") if params else None

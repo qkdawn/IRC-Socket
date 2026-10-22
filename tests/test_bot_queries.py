@@ -101,6 +101,83 @@ class BotQueryTests(unittest.TestCase):
             [message("ISON", "new")],
         )
 
+    def test_ison_overflow_discards_partial_results_drains_batches_and_allows_retry(self):
+        names = {f"n{index:029d}" for index in range(30)}
+        requests = self.queries.start_who("#room", names, "q" * 30, "s" * 63, 100)
+        self.assertGreater(len(requests), 2)
+        self.assertEqual(
+            self.queries.handle(message("303", "q" * 30, "member0"), "q" * 30),
+            [],
+        )
+        self.assertEqual(
+            self.queries.handle(
+                message("417", "q" * 30, "ISON", "Reply too long; use smaller batches"),
+                "q" * 30,
+            ),
+            [],
+        )
+        self.assertEqual(
+            self.queries.start_who("#other", {"new"}, "q" * 30, "s" * 63, 101), []
+        )
+        replies = []
+        for _ in requests[2:]:
+            replies.extend(
+                self.queries.handle(message("303", "q" * 30, "member1"), "q" * 30)
+            )
+        self.assertEqual(
+            replies,
+            [message("PRIVMSG", "#room", "WHO unavailable: server rejected ISON.")],
+        )
+        self.assertEqual(
+            self.queries.start_who("#other", {"new"}, "q" * 30, "s" * 63, 102),
+            [message("ISON", "new")],
+        )
+        self.assertEqual(
+            self.queries.handle(message("303", "q" * 30, "new"), "q" * 30),
+            [
+                message("PRIVMSG", "#other", "WHO member: new"),
+                message("PRIVMSG", "#other", "WHO complete: 1 members"),
+            ],
+        )
+
+    def test_ison_throttle_drains_other_batches_and_allows_retry_without_timeout(self):
+        requests = self.queries.start_who(
+            "#room", {f"member{index}" for index in range(30)},
+            "SuperBot", "irc.local", 100,
+        )
+        self.assertGreater(len(requests), 1)
+        self.assertEqual(
+            self.queries.handle(
+                message("263", "SuperBot", "ISON", "Try again later"), "SuperBot"
+            ),
+            [],
+        )
+        self.assertEqual(
+            self.queries.start_who("#room", {"alice"}, "SuperBot", "irc.local", 101),
+            [],
+        )
+        replies = []
+        for _ in requests[1:]:
+            replies.extend(
+                self.queries.handle(message("303", "SuperBot", "member0"), "SuperBot")
+            )
+        self.assertEqual(
+            replies,
+            [message("PRIVMSG", "#room", "WHO unavailable: server rejected ISON.")],
+        )
+        self.queries.check_timeouts(130)
+        self.assertEqual(
+            self.queries.start_who("#room", {"alice"}, "SuperBot", "irc.local", 131),
+            [message("ISON", "alice")],
+        )
+        self.assertEqual(
+            self.queries.handle(message("303", "SuperBot", "alice"), "SuperBot"),
+            [
+                message("PRIVMSG", "#room", "WHO member: alice"),
+                message("PRIVMSG", "#room", "WHO complete: 1 members"),
+            ],
+        )
+
     def test_non_query_events_remain_available_to_the_client(self):
         for event in (
             message("PING", "probe"),

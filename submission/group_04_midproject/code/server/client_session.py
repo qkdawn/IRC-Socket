@@ -23,7 +23,10 @@ class ClientSession:
         self.server = server
         self.socket = sock
         self.address = address
-        self.client = ClientState(self, address)
+        connected_at = server.monotonic()
+        self.client = ClientState(
+            self, address, last_activity=connected_at, connected_at=connected_at
+        )
         self.decoder = IRCStreamDecoder()
         self.send_lock = threading.Lock()
         self.closed = threading.Event()

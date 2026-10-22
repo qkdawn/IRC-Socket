@@ -2,6 +2,7 @@ import socket
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 from bot.client import BotClient
 from common.stream import IRCStreamDecoder
@@ -50,6 +51,57 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(reply.params[-1], nick)
         requester.sendall(b"PING :still-here\r\n")
         self.wait_for(requester, lambda incoming: incoming.command == "PONG")
+
+    def test_ison_overflow_is_explicit_and_smaller_batches_return_every_online_user(self):
+        self.server.server_name = "s" * 63
+        nickname = "q" * 30
+        requester = self.connect(nickname)
+        self.wait_for(requester, lambda incoming: incoming.command == "001")
+        names = [f"n{index:029d}" for index in range(15)]
+        for name in names:
+            online = self.connect(name)
+            self.wait_for(online, lambda incoming: incoming.command == "001")
+        request = ("ISON :" + " ".join(names) + "\r\n").encode()
+        self.assertEqual(len(request), 472)
+        requester.sendall(request)
+        reply = self.wait_for(
+            requester, lambda incoming: incoming.command in {"303", "417"}
+        )
+        self.assertEqual(reply.command, "417")
+        self.assertEqual(reply.params[:2], (nickname, "ISON"))
+        self.assertIn("smaller batches", reply.params[-1])
+        self.assertLessEqual(len(reply.to_bounded_bytes()), 512)
+        requester.sendall(b"PING :after-overflow\r\n")
+        self.wait_for(requester, lambda incoming: incoming.command == "PONG")
+        self.assertFalse(
+            any(incoming.command in {"303", "417"} for incoming in self.pending[requester])
+        )
+        found = []
+        for batch in (names[:13], names[13:]):
+            requester.sendall(("ISON :" + " ".join(batch) + "\r\n").encode())
+            reply = self.wait_for(
+                requester, lambda incoming: incoming.command in {"303", "417"}
+            )
+            self.assertEqual(reply.command, "303")
+            self.assertLessEqual(len(reply.to_bounded_bytes()), 512)
+            found.extend(reply.params[-1].split())
+        self.assertEqual(found, names)
+
+    def test_registration_timeout_closes_socket_and_releases_reserved_nickname(self):
+        connected_at = self.server.monotonic()
+        pending = self.connect("ReservedNick", register=False)
+        pending.sendall(b"PING :keep-alive\r\n")
+        self.wait_for(pending, lambda incoming: incoming.command == "PONG")
+        self.assertIsNotNone(self.server.state.find_nick("ReservedNick"))
+        with patch.object(
+            self.server, "monotonic", return_value=connected_at + 31
+        ):
+            self.server._check_idle_clients()
+        self.assertEqual(pending.recv(4096), b"")
+        self.assertIsNone(self.server.state.find_nick("ReservedNick"))
+        replacement = self.connect("ReservedNick")
+        welcome = self.wait_for(replacement, lambda incoming: incoming.command == "001")
+        self.assertEqual(welcome.params[0], "ReservedNick")
 
     def test_long_user_is_rejected_then_registration_and_join_succeed(self):
         client = self.connect("alice", register=False)

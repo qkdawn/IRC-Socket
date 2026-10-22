@@ -23,6 +23,12 @@ notifying peers. Send failures queue further QUIT notifications for iterative
 delivery, so a channel-wide connection failure cannot recurse through every
 disconnected user. Healthy peers receive one notification per departure even
 when they share multiple channels.
+JOIN state changes and their notifications enter the server's outgoing FIFO
+under the same state lock used by disconnect cleanup and QUIT enqueueing.
+A single active sender drains the FIFO outside that lock; concurrent sends
+append without waiting for peer writes. A disconnect can therefore close a
+socket immediately while its QUIT stays behind the earlier JOIN. Handler JOIN
+operations use `IRCServer.join_channel()` to preserve this ordering.
 
 `bot` separates transport/event coordination (`client.py`), query workflows
 (`queries.py`), channel membership (`state.py`) and command decisions

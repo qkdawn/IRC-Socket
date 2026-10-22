@@ -22,6 +22,7 @@ class ClientState:
     last_activity: float = field(default_factory=time.monotonic)
     ping_sent: float | None = None
     disconnected: bool = False
+    connected_at: float = field(default_factory=time.monotonic)
 
     @property
     def registered(self) -> bool:

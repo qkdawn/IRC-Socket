@@ -6,16 +6,25 @@ updates, error handling, documentation wording and packaged runtime sources.
 
 ## Corrected defects
 
-- ISON replies include the complete byte budget and omit whole nicknames when
-  the response would exceed 512 bytes. Bot requests budget both directions.
+- ISON replies are all-or-error: a complete `303` fits the 512-byte limit, while
+  an oversized result produces one `417 ISON` error without a partial presence
+  list. Bot requests budget both directions and drains failed batches.
 - USER registration rejects unsafe usernames and usernames over 30 ASCII
   characters, allowing a valid retry on the same connection.
 - Private routing and ISON visibility require completed registration.
+- Server registration has a fixed 30-second deadline from connection creation.
+  Keepalives and nickname changes cannot extend it; expiry closes the socket and
+  releases the nickname atomically with registration state updates.
 - Bot registration, PONG and ISON queries have monotonic deadlines. Reconnection
   discards late ISON responses; failed batches are drained before a new query.
 - Maximum-length PING tokens are preserved in bounded PONG replies.
 - Disconnected clients cannot restore nickname or channel indexes. Heartbeat
   decisions and PONG updates use the shared state lock.
+- JOIN changes and notifications are enqueued atomically with disconnect/QUIT
+  ordering. Socket delivery drains the FIFO outside the state lock, preserving
+  JOIN-before-QUIT even when disconnect occurs during notification delivery.
+  ISON `263` replies finish failed batches, allowing retry without a spurious
+  timeout/reconnect after the remaining replies arrive.
 - NAMES snapshots retain interleaved membership events. Serialization preserves
   trailing whitespace and rejects embedded CR, LF and NUL.
 - Invalid configuration fails before networking; empty or unreadable facts files
@@ -65,8 +74,8 @@ updates, error handling, documentation wording and packaged runtime sources.
 
 ## Verification
 
-- Windows `python -m pytest -q`: 135 tests and 75 subtests passed.
-- Windows `python -m unittest discover -q`: 135 tests passed.
+- Windows `python -m pytest -q`: 146 tests and 79 subtests passed.
+- Windows `python -m unittest discover -q`: 146 tests passed.
 - Before the criterion I extension, Ubuntu WSL2 `python3 -m unittest discover`
   passed the then-current 106 tests; it has not been rerun for this extension.
 - `ruff check .` and `git diff --check`: passed.
@@ -81,7 +90,8 @@ updates, error handling, documentation wording and packaged runtime sources.
   `python scripts/package_code.py`; original local documents remain available.
 - Runtime source and editable presentation/Word text were checked for obsolete
   branding. Official assessment forms retain their original terminology.
-- 19 query scenarios matched the previous submission runtime byte-for-byte,
+- During the earlier cohesion refactor, 19 query scenarios matched the then-current
+  submission runtime byte-for-byte,
   including batching, interleaved results, errors, bounded lists and deadlines.
   Direct component tests also verify that queries need no client or real clock.
 - Protocol annotations have been added; no standalone mypy/pyright checker was

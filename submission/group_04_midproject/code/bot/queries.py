@@ -106,7 +106,7 @@ class BotQueries:
         if outgoing is not None:
             return outgoing
         if (
-            incoming.command in {"421", "461"}
+            incoming.command in {"263", "417", "421", "461"}
             and len(incoming.params) >= 2
             and incoming.params[1].upper() == "ISON"
             and self._who_channel is not None

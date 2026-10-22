@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class IRCServer:
+    REGISTRATION_TIMEOUT = 30.0
     IDLE_TIMEOUT = 30.0
     PONG_TIMEOUT = 30.0
 
@@ -44,6 +45,8 @@ class IRCServer:
         self.ready = threading.Event()
         self.stopping = threading.Event()
         self._monitor: threading.Thread | None = None
+        self._outgoing: deque[tuple[list[ClientState], IRCMessage]] = deque()
+        self._delivering = False
 
     @staticmethod
     def monotonic() -> float:
@@ -84,28 +87,46 @@ class IRCServer:
         self.send_many((client,), msg)
 
     def send_many(self, clients: Iterable[ClientState], msg: IRCMessage) -> None:
-        pending = deque([(list(clients), msg)])
-        while pending:
-            recipients, outgoing = pending.popleft()
-            for client in recipients:
-                if client.disconnected:
-                    continue
-                try:
-                    client.connection.send(outgoing)
-                except (ConnectionError, OSError) as exc:
-                    logger.info("Unable to send to %s: %s", client.address, exc)
-                    peers = self._close_client(client)
-                    if client.nick and peers:
-                        # A failed QUIT recipient can also disconnect. Queue its
-                        # notification instead of recursively walking the channel.
-                        pending.append(
-                            (
-                                peers,
-                                message(
-                                    "QUIT", "Connection lost", prefix=client.prefix
-                                ),
-                            )
-                        )
+        with self.state.lock:
+            self._outgoing.append((list(clients), msg))
+        self._drain_messages()
+
+    def _drain_messages(self) -> None:
+        with self.state.lock:
+            if self._delivering:
+                return
+            self._delivering = True
+        try:
+            while True:
+                with self.state.lock:
+                    if not self._outgoing:
+                        self._delivering = False
+                        return
+                    recipients, outgoing = self._outgoing.popleft()
+                for client in recipients:
+                    if client.disconnected:
+                        continue
+                    try:
+                        client.connection.send(outgoing)
+                    except (ConnectionError, OSError) as exc:
+                        logger.info("Unable to send to %s: %s", client.address, exc)
+                        with self.state.lock:
+                            peers = self._close_client(client)
+                            self._queue_quit(client, peers, "Connection lost")
+        except BaseException:
+            with self.state.lock:
+                self._delivering = False
+            raise
+
+    def join_channel(self, client: ClientState, channel: str) -> bool:
+        with self.state.lock:
+            joined, members = self.state.join(client, channel)
+            if joined:
+                self._outgoing.append(
+                    (members, message("JOIN", channel, prefix=client.prefix))
+                )
+        self._drain_messages()
+        return joined
 
     def broadcast_user_channels(
         self, client: ClientState, msg: IRCMessage, include_self: bool = False
@@ -125,10 +146,21 @@ class IRCServer:
     def disconnect(
         self, client: ClientState, reason: str = "Client Quit", announce: bool = True
     ) -> None:
-        recipients = self._close_client(client)
-        if announce and client.nick and recipients:
-            quit_message = message("QUIT", reason, prefix=client.prefix)
-            self.send_many(recipients, quit_message)
+        with self.state.lock:
+            recipients = self._close_client(client)
+            if announce:
+                self._queue_quit(client, recipients, reason)
+        if announce:
+            self._drain_messages()
+
+    def _queue_quit(
+        self, client: ClientState, recipients: set[ClientState], reason: str
+    ) -> None:
+        """Enqueue under the state lock, after removing the client's routes."""
+        if client.nick and recipients:
+            self._outgoing.append(
+                (list(recipients), message("QUIT", reason, prefix=client.prefix))
+            )
 
     def _close_client(self, client: ClientState) -> set[ClientState]:
         # Remove routes and close before any potentially blocking peer writes.
@@ -151,6 +183,13 @@ class IRCServer:
         for client in clients:
             with self.state.lock:
                 if client.disconnected:
+                    continue
+                if (
+                    not client.registered
+                    and now - client.connected_at >= self.REGISTRATION_TIMEOUT
+                ):
+                    # Keep expiration and removal atomic with NICK/USER updates.
+                    self.disconnect(client, "Registration timeout", announce=False)
                     continue
                 send_probe = (
                     client.ping_sent is None

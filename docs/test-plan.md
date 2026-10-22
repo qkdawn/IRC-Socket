@@ -8,8 +8,9 @@
 
 ## Regression coverage
 
-The automated suite includes maximum-length PING/ISON requests, USER rejection
-and retry, registration-only private-message routing, disconnects during a
+The automated suite includes maximum-length PING/ISON requests, complete-or-error
+ISON overflow handling (with smaller-batch recovery), USER rejection and retry,
+registration-only private-message routing, disconnects during a
 multi-channel JOIN, Bot registration and liveness deadlines, ISON batch errors
 and timeouts, NAMES event ordering, empty facts files, and whitespace-preserving
 message round trips. Startup failures, stopping during Bot socket creation, and
@@ -23,6 +24,11 @@ CLI tests verify invalid ports fail before networking; the server may bind port
 Failure-propagation tests cover 400 same-channel send failures without recursion,
 socket closure before peer notification, and continued delivery to healthy users
 with one QUIT notification per departure across shared channels.
+Concurrent delivery tests pause JOIN delivery, disconnect its sender, then verify
+JOIN-before-QUIT ordering and identical final server/Bot membership. Another test
+fails the JOIN sender's socket before delivering to a healthy peer. ISON throttle
+tests verify both one- and multiple-batch failures, drained replies, no spurious
+query timeout and successful retry.
 Bot readiness regressions cover membership commands before its own JOIN and
 between NAMES chunks, automatic execution after 366, unrelated-channel replies,
 queue saturation, the NAMES deadline, and stale-command removal on reconnect.
@@ -41,6 +47,10 @@ including response generation, failure-batch draining, deadlines and resets.
 State API tests verify detached snapshots, case-insensitive filtering and
 registered counts across disconnects. A handler test supplies only state
 operations, with no storage containers or lock, to verify that boundary.
+Server registration-deadline tests cover silent, NICK-only and USER-only clients,
+PING/PONG and nickname changes that cannot extend the deadline, and registration
+completed just before expiry. An IPv6 socket test verifies closure and nickname
+reuse; a controlled clock verifies cleanup through 300 seconds.
 
 Run `python submission_tools/verify_miniircd.py` for a local check against
 unmodified upstream miniircd. It records the upstream checksum and actual
