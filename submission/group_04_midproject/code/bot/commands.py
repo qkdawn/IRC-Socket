@@ -17,7 +17,9 @@ class CommandAction(Enum):
 
 
 class BotCommandProcessor:
-    def __init__(self, nickname: str, facts_path: Path | None = None, rng=None) -> None:
+    def __init__(
+        self, nickname: str, facts_path: Path | None = None, rng: random.Random | None = None
+    ) -> None:
         self.nickname = nickname
         self.rng = rng or random.Random()
         facts_path = facts_path or Path(__file__).with_name("data") / "facts.txt"
@@ -51,29 +53,7 @@ class BotCommandProcessor:
         if command == "hello":
             return f"Hello, {sender}!"
         if command == "slap":
-            target = argument.strip() if argument.strip() else ""
-            folded_members = {irc_casefold(name): name for name in channel_members}
-            bot_key = irc_casefold(self.nickname)
-            sender_key = irc_casefold(sender)
-            eligible = {
-                name
-                for key, name in folded_members.items()
-                if key not in {bot_key, sender_key}
-            }
-            # The no-argument form excludes both the bot and requester. An
-            # explicit absent target falls back to the requester as required.
-            target_key = irc_casefold(target)
-            if target and target_key in {bot_key, sender_key}:
-                return "Choose a channel member other than yourself or the Bot."
-            if target and target_key in folded_members and target_key != bot_key:
-                chosen = folded_members[target_key]
-            elif target:
-                chosen = sender
-            elif eligible:
-                chosen = self.rng.choice(sorted(eligible))
-            else:
-                return "No eligible channel member to slap."
-            return f"{sender} slaps {chosen} around a bit with a large trout!"
+            return self._slap(argument.strip(), sender, channel_members)
         if command == "who":
             return CommandAction.REQUEST_WHO
         if command in {"channels", "network"}:
@@ -89,6 +69,30 @@ class BotCommandProcessor:
                 sep=" ", timespec="seconds"
             )
         return None
+
+    def _slap(self, target: str, sender: str, members: set[str]) -> str:
+        folded_members = {irc_casefold(name): name for name in members}
+        bot_key = irc_casefold(self.nickname)
+        sender_key = irc_casefold(sender)
+        eligible = {
+            name
+            for key, name in folded_members.items()
+            if key not in {bot_key, sender_key}
+        }
+        # The no-argument form excludes both the bot and requester. An
+        # explicit absent target falls back to the requester as required.
+        target_key = irc_casefold(target)
+        if target and target_key in {bot_key, sender_key}:
+            return "Choose a channel member other than yourself or the Bot."
+        if target and target_key in folded_members:
+            chosen = folded_members[target_key]
+        elif target:
+            chosen = sender
+        elif eligible:
+            chosen = self.rng.choice(sorted(eligible))
+        else:
+            return "No eligible channel member to slap."
+        return f"{sender} slaps {chosen} around a bit with a large trout!"
 
     def private_reply(self) -> str:
         return self.rng.choice(self.facts)

@@ -41,6 +41,9 @@ JOIN and that the Bot retains the replacement user. A real IPv6 test reads all
 Queue tests verify that LIST waits for bounded output space without blocking
 another client's PONG, preserves all entries in order, disconnects a stalled
 producer after its deadline, and wakes a waiting producer on close.
+Delivery contract tests reject reply waits inside nested state transactions,
+allow ordinary sends there, verify ownership cleanup after exceptions, and
+allow reply delivery when a different thread holds the state lock.
 A real IPv6 NAMES test receives complete 353/366 responses for 1,000 channels
 and verifies the connection still answers PING. Malformed-input integration
 checks ERROR delivery before EOF; writer tests verify cleanup even when ERROR
@@ -68,6 +71,13 @@ Server registration-deadline tests cover silent, NICK-only and USER-only clients
 PING/PONG and nickname changes that cannot extend the deadline, and registration
 completed just before expiry. An IPv6 socket test verifies closure and nickname
 reuse; a controlled clock verifies cleanup through 300 seconds.
+
+## Static checks
+
+Run `ruff check .` and `python -m mypy` from the project root. Install mypy with
+`python -m pip install mypy` if needed. `mypy.ini` checks all 21 runtime Python
+files, requires function annotations and checks their bodies. These development
+tools and their configuration are excluded from the runtime submission ZIP.
 
 Run `python submission_tools/verify_miniircd.py` for a local check against
 unmodified upstream miniircd. It records the upstream checksum and actual

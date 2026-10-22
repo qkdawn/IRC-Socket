@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from .errors import NicknameInUseError
@@ -41,13 +43,32 @@ class IRCState:
     """Owns all mutable server state; callers must not retain internal sets."""
 
     def __init__(self) -> None:
-        self.lock = threading.RLock()
+        self._lock = threading.RLock()
+        self._lock_owner: int | None = None
+        self._lock_depth = 0
         self.clients: set[ClientState] = set()
         self.nicknames: dict[str, ClientState] = {}
         self.channels: dict[str, set[ClientState]] = {}
 
+    @contextmanager
+    def locked(self) -> Iterator[None]:
+        """Keep state changes atomic and track nested ownership for delivery."""
+        with self._lock:
+            self._lock_owner = threading.get_ident()
+            self._lock_depth += 1
+            try:
+                yield
+            finally:
+                self._lock_depth -= 1
+                if self._lock_depth == 0:
+                    self._lock_owner = None
+
+    def require_unlocked(self) -> None:
+        if self._lock_owner == threading.get_ident():
+            raise RuntimeError("reply delivery cannot wait while holding IRC state")
+
     def add_client(self, client: ClientState) -> None:
-        with self.lock:
+        with self.locked():
             self._require_connected(client)
             self.clients.add(client)
 
@@ -57,11 +78,11 @@ class IRCState:
         return irc_casefold(channel)
 
     def find_nick(self, nick: str) -> ClientState | None:
-        with self.lock:
+        with self.locked():
             return self.nicknames.get(irc_casefold(nick))
 
     def set_nick(self, client: ClientState, nick: str) -> str | None:
-        with self.lock:
+        with self.locked():
             self._require_connected(client)
             # IRC nickname comparisons are case-insensitive, while preserving
             # the spelling the client chose for display and wire replies.
@@ -78,13 +99,13 @@ class IRCState:
             return old
 
     def set_user(self, client: ClientState, username: str, realname: str) -> None:
-        with self.lock:
+        with self.locked():
             self._require_connected(client)
             client.username = username
             client.realname = realname
 
     def join(self, client: ClientState, channel: str) -> tuple[bool, list[ClientState]]:
-        with self.lock:
+        with self.locked():
             self._require_connected(client)
             # Return a snapshot so the caller can release the state lock before
             # performing potentially blocking socket writes.
@@ -102,7 +123,7 @@ class IRCState:
             raise ConnectionError("client has disconnected")
 
     def part(self, client: ClientState, channel: str) -> tuple[bool, list[ClientState]]:
-        with self.lock:
+        with self.locked():
             channel_key = self._channel_key(channel)
             members = self.channels.get(channel_key)
             if not members or client not in members:
@@ -115,17 +136,17 @@ class IRCState:
             return True, recipients
 
     def channel_members(self, channel: str) -> list[ClientState]:
-        with self.lock:
+        with self.locked():
             return list(self.channels.get(self._channel_key(channel), set()))
 
     def channels_for(self, client: ClientState) -> list[str]:
-        with self.lock:
+        with self.locked():
             return list(client.channels)
 
     def list_channels(self, requested: list[str] | None = None) -> list[tuple[str, int]]:
         """Return channel counts without exposing live membership sets."""
         keys = {irc_casefold(name) for name in requested} if requested is not None else None
-        with self.lock:
+        with self.locked():
             return sorted(
                 (name, len(members))
                 for name, members in self.channels.items()
@@ -133,22 +154,22 @@ class IRCState:
             )
 
     def registered_user_count(self) -> int:
-        with self.lock:
+        with self.locked():
             return sum(client.registered for client in self.clients)
 
     def acknowledge_ping(self, client: ClientState) -> None:
-        with self.lock:
+        with self.locked():
             client.ping_sent = None
 
     def start_ping(self, client: ClientState, now: float) -> None:
         """Start the PONG deadline when the writer takes the queued probe."""
-        with self.lock:
+        with self.locked():
             if not client.disconnected and client.ping_queued:
                 client.ping_queued = False
                 client.ping_sent = now
 
     def direct_target(self, nick: str) -> ClientState | None:
-        with self.lock:
+        with self.locked():
             client = self.nicknames.get(irc_casefold(nick))
             if client is not None and client in self.clients and client.registered:
                 return client
@@ -156,7 +177,7 @@ class IRCState:
 
     def remove(self, client: ClientState) -> list[tuple[str, list[ClientState]]]:
         """Remove a client and return channels plus remaining recipients."""
-        with self.lock:
+        with self.locked():
             # Clean every index in one critical section so no later command can
             # route a message to a disconnected session.
             client.disconnected = True

@@ -55,7 +55,7 @@ class IRCServer:
         # and bind to the unspecified address by default.
         try:
             # Publish the listener and readiness atomically with shutdown.
-            with self.state.lock:
+            with self.state.locked():
                 if self.stopping.is_set():
                     return
                 self.socket = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
@@ -81,17 +81,16 @@ class IRCServer:
         finally:
             self.stop()
 
-    def send(
-        self, client: ClientState, msg: IRCMessage, *, wait_for_space: bool = False
-    ) -> None:
-        if not wait_for_space:
-            self.send_many((client,), msg)
-            return
-        # Reply producers may wait for their own queue, never under state.lock.
+    def send(self, client: ClientState, msg: IRCMessage) -> None:
+        self.send_many((client,), msg)
+
+    def send_reply(self, client: ClientState, msg: IRCMessage) -> None:
+        """Allow bounded queue waits only outside a state transaction."""
+        self.state.require_unlocked()
         if client.disconnected:
             return
         try:
-            client.connection.send(msg, wait_for_space=True)
+            client.connection.send_reply(msg)
         except (ConnectionError, OSError) as exc:
             logger.info("Unable to send to %s: %s", client.address, exc)
             self.disconnect(client, "Connection lost")
@@ -99,7 +98,7 @@ class IRCServer:
     def send_many(self, clients: Iterable[ClientState], msg: IRCMessage) -> None:
         # Connection.send only enqueues; socket writes belong to each session.
         pending = deque([(list(clients), msg)])
-        with self.state.lock:
+        with self.state.locked():
             while pending:
                 recipients, outgoing = pending.popleft()
                 for client in recipients:
@@ -119,14 +118,14 @@ class IRCServer:
                             )
 
     def join_channel(self, client: ClientState, channel: str) -> bool:
-        with self.state.lock:
+        with self.state.locked():
             joined, members = self.state.join(client, channel)
             if joined:
                 self.send_many(members, message("JOIN", channel, prefix=client.prefix))
         return joined
 
     def set_nickname(self, client: ClientState, nick: str) -> str | None:
-        with self.state.lock:
+        with self.state.locked():
             old_prefix = client.prefix
             old = self.state.set_nick(client, nick)
             if old and old != nick:
@@ -137,7 +136,7 @@ class IRCServer:
             return old
 
     def part_channel(self, client: ClientState, channel: str, reason: str) -> bool:
-        with self.state.lock:
+        with self.state.locked():
             parted, members = self.state.part(client, channel)
             if parted:
                 self.send_many(
@@ -151,7 +150,7 @@ class IRCServer:
     def disconnect(
         self, client: ClientState, reason: str = "Client Quit", announce: bool = True
     ) -> None:
-        with self.state.lock:
+        with self.state.locked():
             recipients = self._close_client(client)
             if announce and client.nick and recipients:
                 self.send_many(recipients, message("QUIT", reason, prefix=client.prefix))
@@ -172,10 +171,10 @@ class IRCServer:
 
     def _check_idle_clients(self) -> None:
         now = self.monotonic()
-        with self.state.lock:
+        with self.state.locked():
             clients = list(self.state.clients)
         for client in clients:
-            with self.state.lock:
+            with self.state.locked():
                 if client.disconnected:
                     continue
                 if (
@@ -204,7 +203,7 @@ class IRCServer:
                 self.disconnect(client, "Ping timeout")
 
     def stop(self) -> None:
-        with self.state.lock:
+        with self.state.locked():
             if self.stopping.is_set():
                 return
             self.stopping.set()

@@ -84,11 +84,18 @@ updates, error handling, documentation wording and packaged runtime sources.
   Server handlers use state snapshot/count/PONG operations without accessing
   live containers or locks. Structural delivery/handler contracts replace the
   untyped connection and implicit handler dependency. See `docs/architecture.md`.
+- Delivery now exposes separate `send()` and `send_reply()` operations. Nested
+  state transactions track ownership and reject waiting reply delivery from the
+  thread holding the state lock, including direct session calls. Ordinary sends
+  remain immediate; another thread's ownership does not prohibit replies.
+  Handlers fully annotate client parameters and access fixed state fields
+  directly. Bot slap selection, query rejection and LIST completion use focused
+  helpers without changing their outputs or query state transitions.
 
 ## Verification
 
-- Windows `python -m pytest -q`: 161 tests and 86 subtests passed.
-- Windows `python -m unittest discover -q`: 161 tests passed.
+- Windows `python -m pytest -q`: 163 tests and 86 subtests passed.
+- Windows `python -m unittest discover -q`: 163 tests passed.
 - Before the criterion I extension, Ubuntu WSL2 `python3 -m unittest discover`
   passed the then-current 106 tests; it has not been rerun for this extension.
 - `ruff check .` and `git diff --check`: passed.
@@ -107,8 +114,14 @@ updates, error handling, documentation wording and packaged runtime sources.
   submission runtime byte-for-byte,
   including batching, interleaved results, errors, bounded lists and deadlines.
   Direct component tests also verify that queries need no client or real clock.
-- Protocol annotations have been added; no standalone mypy/pyright checker was
-  installed, so no complete static type-check result is claimed.
+- Configured mypy 2.4.0: all 21 runtime Python files passed with required
+  function annotations and body checking. The checker is development tooling,
+  not a runtime dependency.
+- For the delivery/type/branch refactor, 800 Bot command cases and 21 query
+  sequences matched the preceding submission sources, including outputs and
+  complete query state after each step. Cases include seeded random selection,
+  case mapping, interleaved LIST/LUSERS replies, ISON batching, errors, wrong
+  recipients, deadlines and reconnect resets.
 - Before the criterion I extension, a bounded matrix of 1,020 valid serialized
   command/parameter combinations produced no unexpected handler exceptions.
   This is not exhaustive fuzzing or evidence for the new command handlers.

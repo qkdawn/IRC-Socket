@@ -42,7 +42,7 @@ class ClientSession:
         self._error_sent = False
 
     def start(self) -> None:
-        with self.server.state.lock:
+        with self.server.state.locked():
             # Shutdown snapshots clients under the same lock, so an accepted
             # socket cannot register after that snapshot and escape cleanup.
             if self.server.stopping.is_set():
@@ -59,7 +59,14 @@ class ClientSession:
             )
             raise
 
-    def send(self, msg: IRCMessage, *, wait_for_space: bool = False) -> None:
+    def send(self, msg: IRCMessage) -> None:
+        self._enqueue(msg, wait_for_space=False)
+
+    def send_reply(self, msg: IRCMessage) -> None:
+        self.server.state.require_unlocked()
+        self._enqueue(msg, wait_for_space=True)
+
+    def _enqueue(self, msg: IRCMessage, *, wait_for_space: bool) -> None:
         payload = msg.to_bounded_bytes(
             truncate_trailing=msg.command in {"PART", "QUIT", "ERROR"}
         )

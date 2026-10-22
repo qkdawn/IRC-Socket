@@ -233,9 +233,8 @@ class DeliveryRegressionTests(unittest.TestCase):
 
         with patch.object(session.send_lock, "wait", side_effect=wait):
             producer = threading.Thread(
-                target=self.server.send,
+                target=self.server.send_reply,
                 args=(session.client, message("323", "closing", "End of /LIST")),
-                kwargs={"wait_for_space": True},
             )
             producer.start()
             try:
@@ -248,6 +247,44 @@ class DeliveryRegressionTests(unittest.TestCase):
         self.assertTrue(session.client.disconnected)
         self.assertEqual(session._outgoing.qsize(), 1)
         self.assertIsNone(session._outgoing.get_nowait())
+
+    def test_reply_waits_are_rejected_in_nested_state_transactions(self):
+        session = self.session("replying")
+        reply = message("323", "replying", "End of /LIST")
+        with self.server.state.locked():
+            with self.server.state.locked():
+                with self.assertRaisesRegex(RuntimeError, "holding IRC state"):
+                    self.server.send_reply(session.client, reply)
+            with self.assertRaisesRegex(RuntimeError, "holding IRC state"):
+                session.send_reply(reply)
+            self.server.send(session.client, message("NOTICE", "replying", "queued"))
+        self.assertEqual(session._outgoing.qsize(), 1)
+        with self.assertRaisesRegex(ValueError, "failed transaction"):
+            with self.server.state.locked():
+                raise ValueError("failed transaction")
+        self.server.send_reply(session.client, reply)
+        self.assertEqual(session._outgoing.qsize(), 2)
+        self.assertFalse(session.client.disconnected)
+
+    def test_reply_delivery_is_allowed_when_another_thread_owns_the_state(self):
+        session = self.session("replying")
+        locked, release = threading.Event(), threading.Event()
+
+        def hold_state():
+            with self.server.state.locked():
+                locked.set()
+                release.wait(2)
+
+        owner = threading.Thread(target=hold_state)
+        owner.start()
+        try:
+            self.assertTrue(locked.wait(2))
+            self.server.send_reply(session.client, message("323", "replying", "End"))
+            self.assertEqual(session._outgoing.qsize(), 1)
+        finally:
+            release.set()
+            owner.join(2)
+        self.assertFalse(owner.is_alive())
 
     def test_malformed_input_cleanup_survives_stalled_or_failed_error_writes(self):
         for failure in ("stalled", "failed"):

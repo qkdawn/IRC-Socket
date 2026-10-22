@@ -145,31 +145,32 @@ class BotQueries:
             message("PRIVMSG", channel, f"WHO complete: {len(names)} members"),
         ]
 
-    def _handle_extra_reply(
-        self,
-        incoming: IRCMessage,
-    ) -> list[IRCMessage] | None:
+    def _handle_extra_reply(self, incoming: IRCMessage) -> list[IRCMessage] | None:
         params = incoming.params
         if incoming.command in {"263", "421", "461"} and len(params) >= 2:
-            query = params[1].upper()
-            pending = self._extra_queries.pop(query, None)
-            if pending is None:
-                return None
-            if query == "LIST":
-                self._listed_channels.clear()
-                self._listed_count = 0
-            return [
-                message(
-                    "PRIVMSG",
-                    pending[0],
-                    f"{query} unavailable: server rejected {query}.",
-                )
-            ]
+            return self._reject_extra_query(params[1].upper())
         if incoming.command == RPL_LUSERCLIENT and len(params) >= 2:
             pending = self._extra_queries.pop("LUSERS", None)
             if pending is not None:
                 return [message("PRIVMSG", pending[0], "NETWORK: " + params[-1])]
             return []
+        return self._handle_list_reply(incoming)
+
+    def _reject_extra_query(self, query: str) -> list[IRCMessage] | None:
+        pending = self._extra_queries.pop(query, None)
+        if pending is None:
+            return None
+        if query == "LIST":
+            self._listed_channels.clear()
+            self._listed_count = 0
+        return [
+            message(
+                "PRIVMSG", pending[0], f"{query} unavailable: server rejected {query}."
+            )
+        ]
+
+    def _handle_list_reply(self, incoming: IRCMessage) -> list[IRCMessage] | None:
+        params = incoming.params
         pending = self._extra_queries.get("LIST")
         if pending is None:
             return None
@@ -186,20 +187,23 @@ class BotQueries:
                     self._listed_channels.append((channel, count))
             return []
         if incoming.command == RPL_LISTEND and len(params) >= 2:
-            del self._extra_queries["LIST"]
-            outgoing = [
-                message("PRIVMSG", pending[0], f"CHANNEL: {channel} ({count} users)")
-                for channel, count in self._listed_channels
-            ]
-            outgoing.append(
-                message(
-                    "PRIVMSG",
-                    pending[0],
-                    f"CHANNELS complete: {self._listed_count} channels "
-                    f"(showing {len(self._listed_channels)})",
-                )
-            )
-            self._listed_channels.clear()
-            self._listed_count = 0
-            return outgoing
+            return self._finish_list(pending[0])
         return None
+
+    def _finish_list(self, destination: str) -> list[IRCMessage]:
+        del self._extra_queries["LIST"]
+        outgoing = [
+            message("PRIVMSG", destination, f"CHANNEL: {channel} ({count} users)")
+            for channel, count in self._listed_channels
+        ]
+        outgoing.append(
+            message(
+                "PRIVMSG",
+                destination,
+                f"CHANNELS complete: {self._listed_count} channels "
+                f"(showing {len(self._listed_channels)})",
+            )
+        )
+        self._listed_channels.clear()
+        self._listed_count = 0
+        return outgoing

@@ -24,7 +24,7 @@ class IRCHandlers:
         self.server = server
 
     def handle(self, client: ClientState, incoming: IRCMessage) -> None:
-        if getattr(client, "disconnected", False):
+        if client.disconnected:
             raise ConnectionError("client has disconnected")
         client.last_activity = self.server.monotonic()
         command = incoming.command
@@ -58,7 +58,7 @@ class IRCHandlers:
         # session boundary, where they are logged with their traceback.
         handler(client, incoming.params)
 
-    def error(self, client, numeric: str, *params: str) -> None:
+    def error(self, client: ClientState, numeric: str, *params: str) -> None:
         target = client.nick or "*"
         # Invalid input must not become an invalid middle field in the error reply.
         params = tuple(
@@ -77,7 +77,7 @@ class IRCHandlers:
             client, message(numeric, target, *params, prefix=self.server.server_name)
         )
 
-    def cmd_nick(self, client, params: tuple[str, ...]) -> None:
+    def cmd_nick(self, client: ClientState, params: tuple[str, ...]) -> None:
         if not params or not params[0]:
             self.error(client, numerics.ERR_NONICKNAMEGIVEN, "No nickname given")
             return
@@ -97,7 +97,7 @@ class IRCHandlers:
         if client.registered and old is None:
             self.welcome(client)
 
-    def cmd_user(self, client, params: tuple[str, ...]) -> None:
+    def cmd_user(self, client: ClientState, params: tuple[str, ...]) -> None:
         if client.username is not None:
             self.error(client, numerics.ERR_ALREADYREGISTERED, "You may not reregister")
             return
@@ -118,7 +118,7 @@ class IRCHandlers:
         if client.registered:
             self.welcome(client)
 
-    def welcome(self, client) -> None:
+    def welcome(self, client: ClientState) -> None:
         nick = client.nick or "*"
         prefix = self.server.server_name
         replies = (
@@ -153,7 +153,7 @@ class IRCHandlers:
         for reply in replies:
             self.server.send(client, reply)
 
-    def cmd_join(self, client, params: tuple[str, ...]) -> None:
+    def cmd_join(self, client: ClientState, params: tuple[str, ...]) -> None:
         if not params or not params[0]:
             self.error(
                 client, numerics.ERR_NEEDMOREPARAMS, "JOIN", "Not enough parameters"
@@ -169,11 +169,11 @@ class IRCHandlers:
                 continue
             # JOIN is echoed to the joining client as well as existing members;
             # NAMES then supplies the initial roster for clients joining late.
-            if getattr(client, "disconnected", False):
+            if client.disconnected:
                 return
             self.send_names(client, channel)
 
-    def cmd_part(self, client, params: tuple[str, ...]) -> None:
+    def cmd_part(self, client: ClientState, params: tuple[str, ...]) -> None:
         if not params or not params[0]:
             self.error(
                 client, numerics.ERR_NEEDMOREPARAMS, "PART", "Not enough parameters"
@@ -195,7 +195,7 @@ class IRCHandlers:
                 )
                 continue
 
-    def cmd_names(self, client, params: tuple[str, ...]) -> None:
+    def cmd_names(self, client: ClientState, params: tuple[str, ...]) -> None:
         channels = (
             params[0].split(",")
             if params and params[0]
@@ -209,7 +209,7 @@ class IRCHandlers:
                 continue
             self.send_names(client, channel)
 
-    def send_names(self, client, channel: str) -> None:
+    def send_names(self, client: ClientState, channel: str) -> None:
         """Send the roster in 353 replies, then terminate it with a 366 reply.
 
         Split at nickname boundaries using the encoded reply size, including
@@ -234,16 +234,15 @@ class IRCHandlers:
                 current.append(name)
         chunks.append(" ".join(current))
         for chunk in chunks:
-            if getattr(client, "disconnected", False):
+            if client.disconnected:
                 return
-            self.server.send(
+            self.server.send_reply(
                 client,
                 message(
                     numerics.RPL_NAMREPLY, nick, "=", channel, chunk, prefix=prefix
                 ),
-                wait_for_space=True,
             )
-        self.server.send(
+        self.server.send_reply(
             client,
             message(
                 numerics.RPL_ENDOFNAMES,
@@ -252,10 +251,9 @@ class IRCHandlers:
                 "End of /NAMES list.",
                 prefix=prefix,
             ),
-            wait_for_space=True,
         )
 
-    def cmd_privmsg(self, client, params: tuple[str, ...]) -> None:
+    def cmd_privmsg(self, client: ClientState, params: tuple[str, ...]) -> None:
         if len(params) < 2:
             self.error(
                 client, numerics.ERR_NEEDMOREPARAMS, "PRIVMSG", "Not enough parameters"
@@ -296,7 +294,7 @@ class IRCHandlers:
             return
         self.server.send(destination, outgoing)
 
-    def cmd_ping(self, client, params: tuple[str, ...]) -> None:
+    def cmd_ping(self, client: ClientState, params: tuple[str, ...]) -> None:
         token = params[0] if params else self.server.server_name
         reply = message(
             "PONG", self.server.server_name, token, prefix=self.server.server_name
@@ -306,11 +304,11 @@ class IRCHandlers:
             reply = message("PONG", token)
         self.server.send(client, reply)
 
-    def cmd_pong(self, client, params: tuple[str, ...]) -> None:
+    def cmd_pong(self, client: ClientState, params: tuple[str, ...]) -> None:
         if params and params[-1] == self.server.server_name:
             self.server.state.acknowledge_ping(client)
 
-    def cmd_time(self, client, params: tuple[str, ...]) -> None:
+    def cmd_time(self, client: ClientState, params: tuple[str, ...]) -> None:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
         self.server.send(
             client,
@@ -323,7 +321,7 @@ class IRCHandlers:
             ),
         )
 
-    def cmd_ison(self, client, params: tuple[str, ...]) -> None:
+    def cmd_ison(self, client: ClientState, params: tuple[str, ...]) -> None:
         if not params:
             self.error(
                 client, numerics.ERR_NEEDMOREPARAMS, "ISON", "Not enough parameters"
@@ -350,40 +348,38 @@ class IRCHandlers:
             return
         self.server.send(client, reply)
 
-    def cmd_list(self, client, params: tuple[str, ...]) -> None:
+    def cmd_list(self, client: ClientState, params: tuple[str, ...]) -> None:
         requested = params[0].split(",") if params else None
         for name, count in self.server.state.list_channels(requested):
             if client.disconnected:
                 return
-            self.server.send(
+            self.server.send_reply(
                 client,
                 message(
-                    numerics.RPL_LIST, client.nick, name, str(count), "",
+                    numerics.RPL_LIST, client.nick or "*", name, str(count), "",
                     prefix=self.server.server_name,
                 ),
-                wait_for_space=True,
             )
-        self.server.send(
+        self.server.send_reply(
             client,
             message(
-                numerics.RPL_LISTEND, client.nick, "End of /LIST",
+                numerics.RPL_LISTEND, client.nick or "*", "End of /LIST",
                 prefix=self.server.server_name,
             ),
-            wait_for_space=True,
         )
 
-    def cmd_lusers(self, client, params: tuple[str, ...]) -> None:
+    def cmd_lusers(self, client: ClientState, params: tuple[str, ...]) -> None:
         count = self.server.state.registered_user_count()
         self.server.send(
             client,
             message(
                 numerics.RPL_LUSERCLIENT,
-                client.nick,
+                client.nick or "*",
                 f"There are {count} users and 0 services on 1 server",
                 prefix=self.server.server_name,
             ),
         )
 
-    def cmd_quit(self, client, params: tuple[str, ...]) -> None:
+    def cmd_quit(self, client: ClientState, params: tuple[str, ...]) -> None:
         reason = params[0] if params else "Client Quit"
         self.server.disconnect(client, reason)

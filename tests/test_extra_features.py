@@ -196,7 +196,7 @@ class ExtraServerCommandTests(unittest.TestCase):
         self.server.state.join(self.client, "#Zoo")
         self.server.state.join(self.client, "#alpha")
         self.server.handlers.handle(self.client, message("LIST"))
-        replies = [call.args[0] for call in self.client.connection.send.call_args_list]
+        replies = [call.args[0] for call in self.client.connection.send_reply.call_args_list]
         self.assertEqual([reply.command for reply in replies], ["322", "322", "323"])
         self.assertEqual([reply.params[1] for reply in replies[:-1]], ["#alpha", "#zoo"])
         self.assertTrue(all(reply.params[2] == "1" for reply in replies[:-1]))
@@ -205,14 +205,14 @@ class ExtraServerCommandTests(unittest.TestCase):
         self.server.state.join(self.client, "#room")
         self.server.state.join(self.client, "#other")
         self.server.handlers.handle(self.client, message("LIST", "#ROOM,#missing"))
-        replies = [call.args[0] for call in self.client.connection.send.call_args_list]
+        replies = [call.args[0] for call in self.client.connection.send_reply.call_args_list]
         self.assertEqual([reply.command for reply in replies], ["322", "323"])
         self.assertEqual(replies[0].params[1], "#room")
 
     def test_empty_list_terminates(self):
         self.server.handlers.handle(self.client, message("LIST"))
-        self.client.connection.send.assert_called_once()
-        self.assertEqual(self.client.connection.send.call_args.args[0].command, "323")
+        self.client.connection.send_reply.assert_called_once()
+        self.assertEqual(self.client.connection.send_reply.call_args.args[0].command, "323")
 
     def test_handlers_need_only_state_operations_not_storage_or_locks(self):
         state = Mock(spec=["list_channels", "registered_user_count", "acknowledge_ping"])
@@ -227,7 +227,10 @@ class ExtraServerCommandTests(unittest.TestCase):
         state.registered_user_count.assert_called_once_with()
         state.acknowledge_ping.assert_called_once_with(self.client)
         self.assertEqual(
-            [call.args[1].command for call in server.send.call_args_list],
+            [
+                call.args[1].command for call in server.method_calls
+                if call[0] in {"send", "send_reply"}
+            ],
             ["322", "323", "251"],
         )
 
@@ -251,5 +254,6 @@ class ExtraServerCommandTests(unittest.TestCase):
         self.server.state.join(self.client, "#" + "c" * 49)
         for query in ("LIST", "LUSERS"):
             self.server.handlers.handle(self.client, message(query))
-        for call in self.client.connection.send.call_args_list:
-            self.assertLessEqual(len(call.args[0].to_bounded_bytes()), 512)
+        for call in self.client.connection.method_calls:
+            if call[0] in {"send", "send_reply"}:
+                self.assertLessEqual(len(call.args[0].to_bounded_bytes()), 512)
