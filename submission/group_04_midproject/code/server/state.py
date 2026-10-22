@@ -5,15 +5,15 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any
 
 from .errors import NicknameInUseError
+from .interfaces import ClientConnection
 from common.protocol import irc_casefold
 
 
 @dataclass(eq=False)
 class ClientState:
-    connection: Any
+    connection: ClientConnection
     address: tuple
     nick: str | None = None
     username: str | None = None
@@ -21,6 +21,7 @@ class ClientState:
     channels: set[str] = field(default_factory=set)
     last_activity: float = field(default_factory=time.monotonic)
     ping_sent: float | None = None
+    disconnected: bool = False
 
     @property
     def registered(self) -> bool:
@@ -45,6 +46,7 @@ class IRCState:
 
     def add_client(self, client: ClientState) -> None:
         with self.lock:
+            self._require_connected(client)
             self.clients.add(client)
 
     @staticmethod
@@ -58,6 +60,7 @@ class IRCState:
 
     def set_nick(self, client: ClientState, nick: str) -> str | None:
         with self.lock:
+            self._require_connected(client)
             # IRC nickname comparisons are case-insensitive, while preserving
             # the spelling the client chose for display and wire replies.
             old = client.nick
@@ -74,11 +77,13 @@ class IRCState:
 
     def set_user(self, client: ClientState, username: str, realname: str) -> None:
         with self.lock:
+            self._require_connected(client)
             client.username = username
             client.realname = realname
 
     def join(self, client: ClientState, channel: str) -> tuple[bool, list[ClientState]]:
         with self.lock:
+            self._require_connected(client)
             # Return a snapshot so the caller can release the state lock before
             # performing potentially blocking socket writes.
             channel_key = self._channel_key(channel)
@@ -88,6 +93,11 @@ class IRCState:
             members.add(client)
             client.channels.add(channel_key)
             return True, list(members)
+
+    @staticmethod
+    def _require_connected(client: ClientState) -> None:
+        if client.disconnected:
+            raise ConnectionError("client has disconnected")
 
     def part(self, client: ClientState, channel: str) -> tuple[bool, list[ClientState]]:
         with self.lock:
@@ -110,14 +120,37 @@ class IRCState:
         with self.lock:
             return list(client.channels)
 
+    def list_channels(self, requested: list[str] | None = None) -> list[tuple[str, int]]:
+        """Return channel counts without exposing live membership sets."""
+        keys = {irc_casefold(name) for name in requested} if requested is not None else None
+        with self.lock:
+            return sorted(
+                (name, len(members))
+                for name, members in self.channels.items()
+                if keys is None or name in keys
+            )
+
+    def registered_user_count(self) -> int:
+        with self.lock:
+            return sum(client.registered for client in self.clients)
+
+    def acknowledge_ping(self, client: ClientState) -> None:
+        with self.lock:
+            client.ping_sent = None
+
     def direct_target(self, nick: str) -> ClientState | None:
-        return self.find_nick(nick)
+        with self.lock:
+            client = self.nicknames.get(irc_casefold(nick))
+            if client is not None and client in self.clients and client.registered:
+                return client
+            return None
 
     def remove(self, client: ClientState) -> list[tuple[str, list[ClientState]]]:
         """Remove a client and return channels plus remaining recipients."""
         with self.lock:
             # Clean every index in one critical section so no later command can
             # route a message to a disconnected session.
+            client.disconnected = True
             affected: list[tuple[str, list[ClientState]]] = []
             for channel in list(client.channels):
                 members = self.channels.get(channel, set())

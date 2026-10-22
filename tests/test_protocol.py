@@ -39,6 +39,26 @@ class ProtocolTests(unittest.TestCase):
         msg = IRCMessage("PING", ["token"])
         self.assertEqual(msg.params, ("token",))
 
+    def test_trailing_whitespace_roundtrips_without_changing_parameters(self):
+        for text in ("a\tb", "a\vb", "a\fb", "a\u00a0b", "\t"):
+            with self.subTest(text=text):
+                msg = IRCMessage("PRIVMSG", ("#room", text))
+                self.assertEqual(IRCMessage.parse(msg.serialize()), msg)
+
+    def test_wire_control_characters_and_invalid_commands_are_rejected(self):
+        for line in (
+            "PI\x00NG x",
+            "PING :a\x00b",
+            "PI:NG x",
+            "12 x",
+            "PING\rTIME x",
+            "PING :tail\r\r\n",
+            "PING :tail\n",
+        ):
+            with self.subTest(line=line):
+                with self.assertRaises(IRCParseError):
+                    IRCMessage.parse(line)
+
     def test_non_trailing_parameters_cannot_change_wire_arity(self):
         with self.assertRaises(IRCParseError):
             IRCMessage("CMD", ("has space", "tail")).serialize()

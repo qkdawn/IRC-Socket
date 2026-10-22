@@ -1,13 +1,15 @@
-"""Small, concurrent IPv6 IRC server for the coursework protocol subset."""
+"""Small, concurrent IPv6 IRC server for a practical protocol subset."""
 
 from __future__ import annotations
 
 import logging
+from collections import deque
 import socket
 import threading
 import time
+from collections.abc import Iterable
 
-from common.irc_message import message
+from common.irc_message import IRCMessage, message
 
 from .client_session import ClientSession
 from .handlers import IRCHandlers
@@ -17,9 +19,22 @@ logger = logging.getLogger(__name__)
 
 
 class IRCServer:
+    IDLE_TIMEOUT = 30.0
+    PONG_TIMEOUT = 30.0
+
     def __init__(
-        self, host: str = "::", port: int = 6667, server_name: str = "coursework.local"
+        self, host: str = "::", port: int = 6667, server_name: str = "irc.local"
     ) -> None:
+        if not 0 <= port <= 65535:
+            raise ValueError("port must be between 0 and 65535")
+        if (
+            not 1 <= len(server_name) <= 63
+            or not server_name.isascii()
+            or any(not 33 <= ord(char) <= 126 or char == ":" for char in server_name)
+        ):
+            raise ValueError(
+                "server_name must be 1-63 printable ASCII characters without spaces or ':'"
+            )
         self.host = host
         self.port = port
         self.server_name = server_name
@@ -35,19 +50,23 @@ class IRCServer:
         return time.monotonic()
 
     def serve_forever(self) -> None:
-        # AF_INET6 is explicit: the coursework server must accept IPv6 clients
+        # AF_INET6 is explicit so this server accepts IPv6 clients
         # and bind to the unspecified address by default.
-        self.socket = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.socket.bind((self.host, self.port))
-        self.socket.listen(100)
-        self.socket.settimeout(1.0)
-        self.ready.set()
-        self._monitor = threading.Thread(
-            target=self._monitor_clients, name="irc-monitor", daemon=True
-        )
-        self._monitor.start()
         try:
+            # Publish the listener and readiness atomically with shutdown.
+            with self.state.lock:
+                if self.stopping.is_set():
+                    return
+                self.socket = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                self.socket.bind((self.host, self.port))
+                self.socket.listen(100)
+                self.socket.settimeout(1.0)
+                self.ready.set()
+                self._monitor = threading.Thread(
+                    target=self._monitor_clients, name="irc-monitor", daemon=True
+                )
+                self._monitor.start()
             while not self.stopping.is_set():
                 try:
                     sock, address = self.socket.accept()
@@ -61,19 +80,35 @@ class IRCServer:
         finally:
             self.stop()
 
-    def send(self, client: ClientState, msg) -> None:
-        try:
-            client.connection.send(msg)
-        except (ConnectionError, OSError) as exc:
-            logger.info("Unable to send to %s: %s", client.address, exc)
-            self.disconnect(client, "Connection lost")
+    def send(self, client: ClientState, msg: IRCMessage) -> None:
+        self.send_many((client,), msg)
 
-    def send_many(self, clients, msg) -> None:
-        for client in list(clients):
-            self.send(client, msg)
+    def send_many(self, clients: Iterable[ClientState], msg: IRCMessage) -> None:
+        pending = deque([(list(clients), msg)])
+        while pending:
+            recipients, outgoing = pending.popleft()
+            for client in recipients:
+                if client.disconnected:
+                    continue
+                try:
+                    client.connection.send(outgoing)
+                except (ConnectionError, OSError) as exc:
+                    logger.info("Unable to send to %s: %s", client.address, exc)
+                    peers = self._close_client(client)
+                    if client.nick and peers:
+                        # A failed QUIT recipient can also disconnect. Queue its
+                        # notification instead of recursively walking the channel.
+                        pending.append(
+                            (
+                                peers,
+                                message(
+                                    "QUIT", "Connection lost", prefix=client.prefix
+                                ),
+                            )
+                        )
 
     def broadcast_user_channels(
-        self, client: ClientState, msg, include_self: bool = False
+        self, client: ClientState, msg: IRCMessage, include_self: bool = False
     ) -> None:
         recipients = set()
         for channel in self.state.channels_for(client):
@@ -90,18 +125,20 @@ class IRCServer:
     def disconnect(
         self, client: ClientState, reason: str = "Client Quit", announce: bool = True
     ) -> None:
-        # State removal happens before notifications so concurrent commands no
-        # longer consider this client a valid route or channel member.
-        affected = self.state.remove(client)
-        if announce and client.nick:
+        recipients = self._close_client(client)
+        if announce and client.nick and recipients:
             quit_message = message("QUIT", reason, prefix=client.prefix)
-            recipients = {
-                recipient
-                for _channel, channel_recipients in affected
-                for recipient in channel_recipients
-            }
             self.send_many(recipients, quit_message)
+
+    def _close_client(self, client: ClientState) -> set[ClientState]:
+        # Remove routes and close before any potentially blocking peer writes.
+        affected = self.state.remove(client)
         client.connection.close()
+        return {
+            recipient
+            for _channel, channel_recipients in affected
+            for recipient in channel_recipients
+        }
 
     def _monitor_clients(self) -> None:
         while not self.stopping.wait(1):
@@ -112,24 +149,38 @@ class IRCServer:
         with self.state.lock:
             clients = list(self.state.clients)
         for client in clients:
-            if client.ping_sent is None and now - client.last_activity >= 30:
-                # Record the probe before sending so a fast PONG cannot be lost.
-                client.ping_sent = now
-                self.send(client, message("PING", self.server_name, prefix=self.server_name))
-            if client.ping_sent is not None and now - client.last_activity > 60:
+            with self.state.lock:
+                if client.disconnected:
+                    continue
+                send_probe = (
+                    client.ping_sent is None
+                    and now - client.last_activity >= self.IDLE_TIMEOUT
+                )
+                if send_probe:
+                    # Record the probe before sending so a fast PONG cannot be lost.
+                    client.ping_sent = now
+                timed_out = (
+                    client.ping_sent is not None
+                    and now - client.ping_sent >= self.PONG_TIMEOUT
+                )
+            if send_probe:
+                self.send(
+                    client, message("PING", self.server_name, prefix=self.server_name)
+                )
+            if timed_out:
                 self.disconnect(client, "Ping timeout")
 
     def stop(self) -> None:
-        if self.stopping.is_set():
-            return
-        self.stopping.set()
-        self.ready.clear()
+        with self.state.lock:
+            if self.stopping.is_set():
+                return
+            self.stopping.set()
+            self.ready.clear()
+            clients = list(self.state.clients)
         if self.socket:
             try:
                 self.socket.close()
             except OSError as exc:
                 logger.debug("Server listener close failed: %s", exc)
-        with self.state.lock:
-            clients = list(self.state.clients)
         for client in clients:
             self.disconnect(client, "Server shutting down", announce=False)

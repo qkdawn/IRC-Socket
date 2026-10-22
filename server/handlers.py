@@ -6,16 +6,26 @@ from datetime import datetime, timezone
 
 from common import numerics
 from common.irc_message import IRCMessage, message
-from common.protocol import CHANNEL_PREFIXES, IRC_COMMANDS, is_channel, valid_nickname
+from common.protocol import (
+    CHANNEL_PREFIXES,
+    IRC_COMMANDS,
+    is_channel,
+    valid_nickname,
+    valid_username,
+)
 
 from .errors import NicknameInUseError
+from .interfaces import HandlerServer
+from .state import ClientState
 
 
 class IRCHandlers:
-    def __init__(self, server) -> None:
+    def __init__(self, server: HandlerServer) -> None:
         self.server = server
 
-    def handle(self, client, incoming: IRCMessage) -> None:
+    def handle(self, client: ClientState, incoming: IRCMessage) -> None:
+        if getattr(client, "disconnected", False):
+            raise ConnectionError("client has disconnected")
         client.last_activity = self.server.monotonic()
         command = incoming.command
         if command not in IRC_COMMANDS:
@@ -24,7 +34,12 @@ class IRCHandlers:
                 if not client.registered
                 else numerics.ERR_UNKNOWNCOMMAND
             )
-            self.error(client, numeric, command, "Unknown command" if client.registered else "You have not registered")
+            self.error(
+                client,
+                numeric,
+                command,
+                "Unknown command" if client.registered else "You have not registered",
+            )
             return
         if (
             command not in {"NICK", "USER", "QUIT", "PING", "PONG"}
@@ -47,9 +62,15 @@ class IRCHandlers:
         target = client.nick or "*"
         # Invalid input must not become an invalid middle field in the error reply.
         params = tuple(
-            "*" if index < len(params) - 1 and (
-                not value or len(value.encode('utf-8')) > 100 or value.startswith(":") or any(char.isspace() for char in value)
-            ) else value
+            "*"
+            if index < len(params) - 1
+            and (
+                not value
+                or len(value.encode("utf-8")) > 100
+                or value.startswith(":")
+                or any(char.isspace() for char in value)
+            )
+            else value
             for index, value in enumerate(params)
         )
         self.server.send(
@@ -92,6 +113,14 @@ class IRCHandlers:
                 client, numerics.ERR_NEEDMOREPARAMS, "USER", "Not enough parameters"
             )
             return
+        if not valid_username(params[0]):
+            self.error(
+                client,
+                numerics.ERR_NEEDMOREPARAMS,
+                "USER",
+                "Invalid username: use 1-30 printable ASCII characters excluding ! @ :",
+            )
+            return
         self.server.state.set_user(client, params[0], params[3])
         if client.registered:
             self.welcome(client)
@@ -115,7 +144,7 @@ class IRCHandlers:
             message(
                 numerics.RPL_CREATED,
                 nick,
-                "This server was created for coursework",
+                "IRC server ready",
                 prefix=prefix,
             ),
             message(
@@ -151,6 +180,8 @@ class IRCHandlers:
             self.server.send_many(
                 members, message("JOIN", channel, prefix=client.prefix)
             )
+            if getattr(client, "disconnected", False):
+                return
             self.send_names(client, channel)
 
     def cmd_part(self, client, params: tuple[str, ...]) -> None:
@@ -278,15 +309,17 @@ class IRCHandlers:
 
     def cmd_ping(self, client, params: tuple[str, ...]) -> None:
         token = params[0] if params else self.server.server_name
-        self.server.send(
-            client,
-            message(
-                "PONG", self.server.server_name, token, prefix=self.server.server_name
-            ),
+        reply = message(
+            "PONG", self.server.server_name, token, prefix=self.server.server_name
         )
+        if len(reply.to_bytes()) > 512:
+            # Optional routing fields must not displace the echoed PING token.
+            reply = message("PONG", token)
+        self.server.send(client, reply)
 
     def cmd_pong(self, client, params: tuple[str, ...]) -> None:
-        client.ping_sent = None
+        if params and params[-1] == self.server.server_name:
+            self.server.state.acknowledge_ping(client)
 
     def cmd_time(self, client, params: tuple[str, ...]) -> None:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -303,12 +336,55 @@ class IRCHandlers:
 
     def cmd_ison(self, client, params: tuple[str, ...]) -> None:
         if not params:
-            self.error(client, numerics.ERR_NEEDMOREPARAMS, "ISON", "Not enough parameters")
+            self.error(
+                client, numerics.ERR_NEEDMOREPARAMS, "ISON", "Not enough parameters"
+            )
             return
-        names = [name for param in params for name in param.split()
-                 if self.server.state.find_nick(name) is not None]
-        self.server.send(client, message("303", client.nick or "*", " ".join(names),
-                                        prefix=self.server.server_name))
+        names: list[str] = []
+        seen: set[str] = set()
+        nick = client.nick or "*"
+        prefix = self.server.server_name
+        for name in (name for param in params for name in param.split()):
+            target = self.server.state.direct_target(name)
+            if target is None or not target.nick or target.nick in seen:
+                continue
+            candidate = " ".join((*names, target.nick))
+            if len(message("303", nick, candidate, prefix=prefix).to_bytes()) > 512:
+                # ISON has one reply per request; omit whole names that do not fit.
+                continue
+            names.append(target.nick)
+            seen.add(target.nick)
+        self.server.send(client, message("303", nick, " ".join(names), prefix=prefix))
+
+    def cmd_list(self, client, params: tuple[str, ...]) -> None:
+        requested = params[0].split(",") if params else None
+        for name, count in self.server.state.list_channels(requested):
+            self.server.send(
+                client,
+                message(
+                    numerics.RPL_LIST, client.nick, name, str(count), "",
+                    prefix=self.server.server_name,
+                ),
+            )
+        self.server.send(
+            client,
+            message(
+                numerics.RPL_LISTEND, client.nick, "End of /LIST",
+                prefix=self.server.server_name,
+            ),
+        )
+
+    def cmd_lusers(self, client, params: tuple[str, ...]) -> None:
+        count = self.server.state.registered_user_count()
+        self.server.send(
+            client,
+            message(
+                numerics.RPL_LUSERCLIENT,
+                client.nick,
+                f"There are {count} users and 0 services on 1 server",
+                prefix=self.server.server_name,
+            ),
+        )
 
     def cmd_quit(self, client, params: tuple[str, ...]) -> None:
         reason = params[0] if params else "Client Quit"

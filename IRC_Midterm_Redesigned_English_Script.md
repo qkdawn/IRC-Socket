@@ -1,6 +1,6 @@
 ## Slide 1 (0:00–0:20)
 
-Good morning. This is our midterm progress report for the socket programming coursework. We have implemented the shared IRC protocol layer, a command Bot, and a lightweight server using Python sockets. I will explain the required behavior and how our current code provides it.
+Good morning. This is our midterm progress report for the socket programming project. We have implemented the shared IRC protocol layer, a command Bot, and a lightweight server using Python sockets. I will explain the required behavior and how our current code provides it.
 
 ## Slide 2 (0:20–0:40)
 

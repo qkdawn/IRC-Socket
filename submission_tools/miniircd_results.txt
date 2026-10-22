@@ -3,9 +3,13 @@ SHA256: b4484f682934d2d8d425b2e474bdeeb26f4ec323c819027e875d00e518fd9a35
 Environment: local IPv6 ::1; not the assessed VMs or HexChat.
 Registration, nickname collision recovery and JOIN: PASS
 !hello: PASS (Hello, alice!)
-!time: PASS (Bot time: 2026-10-08 21:20:11+08:00)
+!time: PASS (Bot time: 2026-10-22 20:27:55+08:00)
 !slap alice: PASS (Choose a channel member other than yourself or the Bot.)
 !slap absent: PASS (alice slaps alice around a bit with a large trout!)
 !who: PASS (WHO complete: 2 members)
-Private fact: PASS (The first email was sent in 1971.)
+!channels: PASS (CHANNEL: #hello (2 users))
+LIST discovers a channel the Bot has not joined: PASS (CHANNEL: #discovery (1 users))
+LIST completion: PASS (CHANNELS complete: 2 channels (showing 2))
+!network: PASS (NETWORK: There are 3 users and 0 services on 1 server)
+Private fact: PASS (Honey can remain edible for a very long time when stored correctly.)
 Bot PING handler sends PONG to miniircd: PASS

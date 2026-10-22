@@ -75,11 +75,24 @@ class RubricAlignmentTests(unittest.TestCase):
         server.state.add_client(client)
         server.monotonic = lambda: 30
         server._check_idle_clients()
-        server.handlers.handle(client, message('PONG', 'coursework.local'))
+        server.handlers.handle(client, message('PONG', 'irc.local'))
         server.monotonic = lambda: 61
         server._check_idle_clients()
         self.assertIn(client, server.state.clients)
         client.connection.close.assert_not_called()
+
+    def test_unrelated_traffic_and_wrong_pong_do_not_extend_probe_deadline(self):
+        server = IRCServer()
+        client = ClientState(Mock(), ('::1', 1), nick='alice', username='user', last_activity=0)
+        server.state.add_client(client)
+        server.monotonic = lambda: 30
+        server._check_idle_clients()
+        server.monotonic = lambda: 45
+        server.handlers.handle(client, message('PONG', 'wrong-token'))
+        server.handlers.handle(client, message('PING', 'still-here'))
+        server.monotonic = lambda: 61
+        server._check_idle_clients()
+        self.assertNotIn(client, server.state.clients)
 
     def test_bot_recovers_from_nickname_collision_before_join(self):
         bot = BotClient(nickname='SuperBot')

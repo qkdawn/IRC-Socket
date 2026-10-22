@@ -92,6 +92,8 @@ class ReviewFixTests(unittest.TestCase):
         self.assertEqual(irc_casefold("[Nick]\\^"), irc_casefold("{nick}|~"))
         server = IRCServer()
         a, b = [ClientState(Mock(), ("::1", index)) for index in (1, 2)]
+        server.state.add_client(a)
+        server.state.set_user(a, "user", "Real")
         server.state.set_nick(a, "[Nick]")
         with self.assertRaises(NicknameInUseError):
             server.state.set_nick(b, "{nick}")

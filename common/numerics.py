@@ -1,9 +1,12 @@
-"""IRC numeric reply constants used by the coursework subset."""
+"""IRC numeric reply constants used by this implementation."""
 
 RPL_WELCOME = "001"
 RPL_YOURHOST = "002"
 RPL_CREATED = "003"
 RPL_MYINFO = "004"
+RPL_LUSERCLIENT = "251"
+RPL_LIST = "322"
+RPL_LISTEND = "323"
 RPL_NAMREPLY = "353"
 RPL_ENDOFNAMES = "366"
 RPL_TIME = "391"

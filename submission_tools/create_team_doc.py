@@ -86,7 +86,7 @@ r.font.name = "Aptos"
 r.font.size = Pt(11)
 r.font.color.rgb = RGBColor(40, 84, 197)
 h(doc, "1 Team Responsibility")
-doc.add_paragraph("The group assigns an equal contribution share of 20% to each member. Student A participated across every area and led the common protocol layer. B/C formed the server pair and D/E formed the Bot pair, with A participating across both. The detailed functions below identify each member's main implementation areas.")
+doc.add_paragraph("The group assigns an equal contribution share of 20% to each member. Member A participated across every area and led the common protocol layer. B/C formed the server pair and D/E formed the Bot pair, with A participating across both. The detailed functions below identify each member's main implementation areas.")
 add_table(doc, ["Member", "Responsibility", "Function and file evidence"], [
     ("A Kun Qian", "Common protocol and integration", "common/irc_message.py: IRCMessage.parse, serialize, to_bytes, to_bounded_bytes; common/stream.py: IRCStreamDecoder.feed; common/protocol.py: is_channel, valid_nickname, irc_casefold; common/numerics.py; protocol and integration review."),
     ("B Yibo Xu", "Server connection lifecycle", "server/server.py: serve_forever, send, send_many, broadcast_user_channels, disconnect, stop; server/client_session.py: start, run, send, close. IPv6 listener, sessions, serialized output and cleanup."),
@@ -133,7 +133,7 @@ add_table(doc, ["Requirement", "Implementation", "Evidence"], [
     ("Join and leave", "JOIN updates membership, broadcasts JOIN and sends 353/366. PART retains the connection. QUIT and disconnect clean all indexes.", "cmd_join, cmd_part, send_names and IRCState"),
     ("Channel messages", "Channel membership is required; messages go only to other members of the same channel.", "cmd_privmsg and IPv6 integration"),
     ("Errors", "Unknown commands, invalid or duplicate nicknames, missing parameters and invalid targets produce numerics. Malformed streams receive ERROR and close only that session.", "numerics.py and handler tests"),
-    ("Keep-alive", "PING after 30 seconds without activity; removal after more than 60 seconds without command or PONG; scan every second.", "_check_idle_clients and timeout tests"),
+    ("Keep-alive", "PING after 30 seconds without activity; removal if a matching PONG is absent after another 30 seconds; scan every second.", "_check_idle_clients and timeout tests"),
     ("Wire length", "Relay messages are checked after adding the prefix. PART, QUIT and ERROR reasons are shortened at a UTF-8 boundary to remain within 512 bytes.", "IRCMessage.to_bounded_bytes and review tests"),
 ])
 
@@ -144,7 +144,7 @@ h(doc, "5.2 Commands and Private Facts", 2)
 add_table(doc, ["Command or event", "Behavior"], [
     ("Private PRIVMSG", "Replies with a random non-empty line from bot/data/facts.txt."),
     ("!hello", "Greets the channel sender."),
-    ("!slap [user]", "Chooses an eligible member while excluding the Bot and sender when possible. Explicit self/Bot targets are rejected. An absent named target falls back to the sender, matching the brief."),
+    ("!slap [user]", "Without a target, chooses a member other than the Bot and sender, or reports no eligible member. Explicit self/Bot targets are rejected. An absent named target falls back to the sender, matching the brief."),
     ("!who", "Uses the new IRC ISON command and processes numeric 303 to report confirmed known members and a count."),
     ("!time", "Reports the Bot machine's local time with UTC offset."),
     ("NICK event", "Updates the member list and the Bot's own nickname when the server confirms a Bot rename."),
@@ -152,7 +152,7 @@ add_table(doc, ["Command or event", "Behavior"], [
 
 h(doc, "6 References")
 references = [
-    '[1] DI 31001, "Project Brief: Coursework 1 Socket Programming," University of Dundee, 2026.',
+    '[1] DI 31001, "Socket Programming Project Brief," University of Dundee, 2026.',
     '[2] DI 31001, "4. Marking Criteria," University of Dundee, 2026.',
     '[3] DI 31001, "Project Marking Sheet," University of Dundee, 2026.',
     '[4] C. Kalt, "Internet Relay Chat: Client Protocol," RFC 2812, Apr. 2000. [Online]. Available: https://www.rfc-editor.org/rfc/rfc2812',

@@ -9,10 +9,11 @@ import urllib.request
 import hashlib
 
 ROOT = Path(__file__).resolve().parents[1]
+# Direct script execution needs the project root before local imports.
 sys.path.insert(0, str(ROOT))
-from bot.client import BotClient
-from common.irc_message import message
-from scripts.live_validate import connect, wait_for
+from bot.client import BotClient  # noqa: E402
+from common.irc_message import message  # noqa: E402
+from scripts.live_validate import connect, wait_for  # noqa: E402
 
 
 def main():
@@ -45,6 +46,8 @@ def main():
         sockets.append(alice)
         alice.sendall(b'JOIN #hello\r\n')
         wait_for(alice, decoder, lambda m: m.command == '366')
+        alice.sendall(b'JOIN #discovery\r\n')
+        wait_for(alice, decoder, lambda m: m.command == '366' and m.params[1] == '#discovery')
         occupied, _ = connect('::1', port, 'SuperBot')
         sockets.append(occupied)
         bot = BotClient('::1', port, 'SuperBot', '#hello')
@@ -53,10 +56,15 @@ def main():
         joined = wait_for(alice, decoder, lambda m: m.command == 'JOIN' and m.prefix.startswith('SuperBot_'))
         nick = joined.prefix.split('!')[0]
         lines.append('Registration, nickname collision recovery and JOIN: PASS')
-        for command, expected in [('!hello', 'Hello, alice!'), ('!time', 'Bot time:'), ('!slap alice', 'Choose a channel member'), ('!slap absent', 'alice slaps alice'), ('!who', 'WHO complete: 2 members')]:
+        for command, expected in [('!hello', 'Hello, alice!'), ('!time', 'Bot time:'), ('!slap alice', 'Choose a channel member'), ('!slap absent', 'alice slaps alice'), ('!who', 'WHO complete: 2 members'), ('!channels', 'CHANNEL: #hello (2 users)'), ('!network', 'NETWORK: There are 3 users and 0 services on 1 server')]:
             alice.sendall(message('PRIVMSG', '#hello', command).to_bytes())
             reply = wait_for(alice, decoder, lambda m: m.command == 'PRIVMSG' and expected in m.params[-1])
             lines.append(f'{command}: PASS ({reply.params[-1]})')
+            if command == '!channels':
+                discovered = wait_for(alice, decoder, lambda m: m.command == 'PRIVMSG' and m.params[-1] == 'CHANNEL: #discovery (1 users)')
+                lines.append('LIST discovers a channel the Bot has not joined: PASS (' + discovered.params[-1] + ')')
+                completed = wait_for(alice, decoder, lambda m: m.command == 'PRIVMSG' and m.params[-1] == 'CHANNELS complete: 2 channels (showing 2)')
+                lines.append('LIST completion: PASS (' + completed.params[-1] + ')')
         alice.sendall(message('PRIVMSG', nick, 'Tell me a fact').to_bytes())
         reply = wait_for(alice, decoder, lambda m: m.command == 'PRIVMSG' and m.params[0] == 'alice')
         lines.append('Private fact: PASS (' + reply.params[-1] + ')')

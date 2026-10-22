@@ -1,7 +1,7 @@
 """Protocol-level names and validation shared by client and server."""
 
 IRC_COMMANDS = frozenset(
-    {"NICK", "USER", "JOIN", "PART", "PRIVMSG", "NAMES", "QUIT", "PING", "PONG", "TIME", "ISON"}
+    {"NICK", "USER", "JOIN", "PART", "PRIVMSG", "NAMES", "QUIT", "PING", "PONG", "TIME", "ISON", "LIST", "LUSERS"}
 )
 CHANNEL_PREFIXES = ("#", "&")
 
@@ -27,7 +27,7 @@ def is_channel(target: str) -> bool:
 
 
 def valid_nickname(nickname: str) -> bool:
-    """Apply the compact nickname grammar needed by the coursework server."""
+    """Apply the compact nickname grammar supported by this server."""
     if not 1 <= len(nickname) <= 30:
         return False
     ascii_letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -35,3 +35,10 @@ def valid_nickname(nickname: str) -> bool:
     if not (nickname[0] in ascii_letters or nickname[0] in special):
         return False
     return all(ch in ascii_letters + "0123456789" + special + "-" for ch in nickname)
+
+
+def valid_username(username: str) -> bool:
+    """Apply the local 1-30 ASCII character limit for user prefix fields."""
+    return 1 <= len(username) <= 30 and all(
+        33 <= ord(char) <= 126 and char not in "!@:" for char in username
+    )

@@ -11,6 +11,7 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from common.stream import IRCStreamDecoder
+from common.irc_message import message
 
 
 class LiveDecoder(IRCStreamDecoder):
@@ -41,10 +42,18 @@ def wait_for(
 
 def connect(host: str, port: int, nickname: str):
     sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-    sock.connect((host, port))
-    decoder = LiveDecoder()
-    sock.sendall(f"NICK {nickname}\r\nUSER {nickname} 0 * :{nickname}\r\n".encode())
-    wait_for(sock, decoder, lambda msg: msg.command == "001")
+    try:
+        sock.settimeout(5.0)
+        sock.connect((host, port))
+        decoder = LiveDecoder()
+        sock.sendall(
+            message("NICK", nickname).to_bounded_bytes()
+            + message("USER", nickname, "0", "*", nickname).to_bounded_bytes()
+        )
+        wait_for(sock, decoder, lambda msg: msg.command == "001")
+    except BaseException:
+        sock.close()
+        raise
     return sock, decoder
 
 

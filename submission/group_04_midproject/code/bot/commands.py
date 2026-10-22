@@ -11,6 +11,9 @@ from common.protocol import irc_casefold
 
 class CommandAction(Enum):
     REQUEST_WHO = auto()
+    REQUEST_CHANNELS = auto()
+    REQUEST_NETWORK = auto()
+    WAIT_FOR_NAMES = auto()
 
 
 class BotCommandProcessor:
@@ -22,20 +25,29 @@ class BotCommandProcessor:
             self.facts = [
                 line.strip()
                 for line in facts_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
+                if line.strip() and "\x00" not in line
             ]
-        except OSError:
+        except (OSError, UnicodeError):
+            self.facts = []
+        if not self.facts:
             self.facts = [
                 "The network is made of packets, and packets travel one hop at a time."
             ]
 
     def channel_command(
-        self, text: str, sender: str, channel_members: set[str]
+        self,
+        text: str,
+        sender: str,
+        channel_members: set[str],
+        *,
+        members_complete: bool = True,
     ) -> str | CommandAction | None:
         if not text.startswith("!"):
             return None
         command, _, argument = text[1:].partition(" ")
         command = command.casefold()
+        if command in {"slap", "who"} and not members_complete:
+            return CommandAction.WAIT_FOR_NAMES
         if command == "hello":
             return f"Hello, {sender}!"
         if command == "slap":
@@ -64,8 +76,18 @@ class BotCommandProcessor:
             return f"{sender} slaps {chosen} around a bit with a large trout!"
         if command == "who":
             return CommandAction.REQUEST_WHO
+        if command in {"channels", "network"}:
+            if argument.strip():
+                return f"Usage: !{command}"
+            return (
+                CommandAction.REQUEST_CHANNELS
+                if command == "channels"
+                else CommandAction.REQUEST_NETWORK
+            )
         if command == "time":
-            return "Bot time: " + datetime.now().astimezone().isoformat(sep=" ", timespec="seconds")
+            return "Bot time: " + datetime.now().astimezone().isoformat(
+                sep=" ", timespec="seconds"
+            )
         return None
 
     def private_reply(self) -> str:

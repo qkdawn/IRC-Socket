@@ -20,24 +20,32 @@ class IRCMessage:
 
     def __post_init__(self) -> None:
         command = self.command.strip()
-        if not command or any(ch.isspace() for ch in command):
+        if (
+            not command
+            or not command.isascii()
+            or not (command.isalpha() or (len(command) == 3 and command.isdigit()))
+        ):
             raise IRCParseError("command must be a non-empty token")
         object.__setattr__(self, "command", command.upper())
         object.__setattr__(self, "params", tuple(self.params))
         if self.prefix is not None and (
-            not self.prefix or any(ch.isspace() or ch in "\r\n" for ch in self.prefix)
+            not self.prefix
+            or any(ch.isspace() or ch in "\r\n\x00" for ch in self.prefix)
         ):
             raise IRCParseError("prefix must be a non-empty token")
         if len(self.params) > 15:
             raise IRCParseError("IRC messages have at most 15 parameters")
         for param in self.params:
-            if "\r" in param or "\n" in param:
-                raise IRCParseError("parameters cannot contain CR or LF")
+            if any(char in param for char in "\r\n\x00"):
+                raise IRCParseError("parameters cannot contain CR, LF or NUL")
 
     @classmethod
     def parse(cls, line: str) -> "IRCMessage":
         """Parse one IRC line, keeping a colon-prefixed trailing field intact."""
-        line = line.rstrip("\r\n")
+        if line.endswith("\r\n"):
+            line = line[:-2]
+        if any(char in line for char in "\r\n\x00"):
+            raise IRCParseError("IRC line cannot contain embedded CR, LF or NUL")
         if not line:
             raise IRCParseError("empty IRC line")
 
@@ -85,7 +93,11 @@ class IRCMessage:
                     raise IRCParseError(
                         "only the final parameter may contain spaces or start with ':'"
                     )
-                if is_last and (not param or " " in param or param.startswith(":")):
+                if is_last and (
+                    not param
+                    or any(ch.isspace() for ch in param)
+                    or param.startswith(":")
+                ):
                     # The leading colon here is the wire delimiter. Preserve a
                     # second colon when the logical value itself starts with one.
                     pieces.append(":" + param)
@@ -110,7 +122,9 @@ class IRCMessage:
         if available < 0:
             raise IRCParseError("IRC routing fields exceed maximum length")
         # Cutting bytes can split a UTF-8 code point; discard only that tail.
-        trailing = self.params[-1].encode("utf-8")[:available].decode("utf-8", errors="ignore")
+        trailing = (
+            self.params[-1].encode("utf-8")[:available].decode("utf-8", errors="ignore")
+        )
         bounded = IRCMessage(self.command, (*self.params[:-1], trailing), self.prefix)
         return bounded.to_bytes()
 

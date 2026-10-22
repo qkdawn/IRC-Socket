@@ -2,7 +2,7 @@
 
 ## Slide 1 | Project scope and completion status | 0:00-0:20
 
-Good morning, and thank you for having us. Our project implements a lightweight IPv6 IRC server and a command Bot using Python sockets. In this midterm review, we will explain how the implementation meets the coursework requirements and what behavior has been completed.
+Good morning, and thank you for having us. Our project implements a lightweight IPv6 IRC server and a command Bot using Python sockets. In this midterm review, we will explain how the implementation meets the project requirements and what behavior has been completed.
 
 ## Slide 2 | Project scope and code structure | 0:20-1:00
 
@@ -44,4 +44,4 @@ It also checks the actual UTF-8 byte length of a relayed `PRIVMSG`. If adding th
 
 Disconnect cleanup, nickname reuse, and PING timeout handling keep the shared state correct. Malformed input remains isolated to one client session and does not stop the entire server.
 
-That completes our midterm progress review. The core implementation and the main coursework requirements are complete, and the remaining work is to organize the project materials and finalize the submission. Thank you.
+That completes our midterm progress review. The core implementation and the main project requirements are complete, and the remaining work is to organize the project materials and finalize the submission. Thank you.

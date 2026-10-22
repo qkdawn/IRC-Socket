@@ -47,6 +47,28 @@ class StateTests(unittest.TestCase):
         with self.assertRaises(NicknameInUseError):
             self.state.set_nick(self.b, "ALICE")
 
+    def test_channel_count_snapshots_are_sorted_filtered_and_detached(self):
+        self.state.join(self.a, "#Room")
+        self.state.join(self.b, "#room")
+        self.state.join(self.a, "#alpha")
+        snapshot = self.state.list_channels()
+        self.assertEqual(snapshot, [("#alpha", 1), ("#room", 2)])
+        self.assertEqual(self.state.list_channels(["#ROOM", "#missing"]), [("#room", 2)])
+        self.assertEqual(self.state.list_channels([]), [])
+        self.state.part(self.b, "#room")
+        self.assertEqual(snapshot, [("#alpha", 1), ("#room", 2)])
+        snapshot.clear()
+        self.assertEqual(self.state.list_channels(), [("#alpha", 1), ("#room", 1)])
+
+    def test_registered_user_count_tracks_registration_and_disconnect(self):
+        self.assertEqual(self.state.registered_user_count(), 0)
+        self.state.set_user(self.a, "user", "Alice")
+        self.assertEqual(self.state.registered_user_count(), 1)
+        self.state.set_user(self.b, "user", "Bob")
+        self.assertEqual(self.state.registered_user_count(), 2)
+        self.state.remove(self.a)
+        self.assertEqual(self.state.registered_user_count(), 1)
+
     def test_remove_cleans_indexes(self):
         self.state.join(self.a, "#room")
         self.state.remove(self.a)

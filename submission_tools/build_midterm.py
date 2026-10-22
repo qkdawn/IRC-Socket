@@ -1,6 +1,5 @@
 """Build a reviewable Group 4 submission without inventing personal assessments."""
 from pathlib import Path
-from io import StringIO
 import shutil
 import subprocess
 import sys
@@ -13,7 +12,7 @@ from pypdf.generic import NameObject, TextStringObject, NumberObject
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+from reportlab.platypus import SimpleDocTemplate, Paragraph, PageBreak
 from reportlab.lib.pagesizes import A4
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,16 +42,16 @@ def pdf(name, pages):
             text = text.replace('Thirty automated tests', 'Thirty-eight automated tests').replace('30 passing tests', '38 passing tests')
             text = text.replace('supplied VM, miniircd and HexChat acceptance results require confirmation.', 'the group confirms prior supplied VM, miniircd and HexChat acceptance tests.')
             if text.startswith('The monitor currently'):
-                text = 'The monitor checks once per second and sends PING after 30 seconds without a received command. A client with no command or PONG for more than 60 seconds is disconnected and its state cleaned up. Responsive idle clients remain connected. TLS, channel modes/permissions and server-to-server links are outside the required scope.'
+                text = 'The monitor checks once per second and sends PING after 30 seconds without a received command. If a matching PONG is absent after another 30 seconds, the client is disconnected and its state cleaned up. Other commands do not extend that deadline. Responsive idle clients remain connected. TLS, channel modes/permissions and server-to-server links are outside the required scope.'
             if text.startswith('!time sends') or text.startswith('!time reads'):
                 text = '!who is the extra feature compatible with miniircd. It sends ISON and reads numeric 303 to confirm known channel members online. !time returns the Bot local system clock with UTC offset, without relying on miniircd TIME support. Private messages receive random facts from bot/data/facts.txt.'
             if text.startswith('The Chinese presentation reports'):
                 text = 'The group confirms prior practical VM, miniircd and HexChat verification. New alignment changes are covered by separate local regression and compatibility tests. The packaged log records tests run during packaging; previous VM verification is a group statement. Average CPU below 10% needs a recorded measurement in the assessed VM environment.'
             if text.startswith('The current server waits'):
-                text = 'The server probes after 30 seconds of inactivity and removes peers with no received command or PONG for more than 60 seconds. An optional extension would expose these intervals through validated command-line settings. TCP being open does not prove responsiveness. Keep one outstanding probe and monotonic deadlines. RFC 2812 sections 3.7.2 and 3.7.3 describe PING and PONG.'
+                text = 'The server probes after 30 seconds of inactivity and disconnects peers if a matching PONG is absent after another 30 seconds. Other traffic does not extend the probe deadline. An optional extension would expose these intervals through validated command-line settings. TCP being open does not prove responsiveness. Keep one outstanding probe and monotonic deadlines. RFC 2812 sections 3.7.2 and 3.7.3 describe PING and PONG.'
             if text.startswith('Local integration proves'):
                 text = 'miniircd WHO replies do not escape an IPv6 host parameter correctly. The Bot provides !who using the new command ISON and numeric 303. A future extension could discover server capabilities and use WHO only where compatible. RFC 2812 sections 3.6.1 and 4.9 describe WHO and ISON. Interoperability depends on actual server responses.'
-            text = text.replace('sum to 100% in each proposition row. Student IDs', 'sum to 100% in each proposition row. Proposed midterm marks are filled at 18/18. Student IDs')
+            text = text.replace('sum to 100% in each proposition row. Member identifiers', 'sum to 100% in each proposition row. Proposed midterm marks are filled at 18/18. Member identifiers')
             text = text.replace('and TIME.', 'and TIME and ISON.')
             if text.startswith('!hello greets'):
                 text = '!hello greets the sender. !slap without a target chooses a member other than the sender and Bot, or reports no eligible member. Explicit self/Bot targets are rejected. A named target absent from the channel falls back to the sender, as required by the project brief. This fallback is an exception to the rubric wording excluding the sender.'
@@ -74,15 +73,15 @@ def marking():
     fields = reader.get_fields()
     values = dict(zip(['aa', 'bb', 'cc', 'dd', 'ee'], [m[1] for m in MEMBERS]))
     comments = {
-        'com11': 'Student A led IRCMessage, stream framing, numerics and protocol validation; also reviewed integration boundaries. 38 tests pass. Evidence: common/*.py, tests/test_protocol.py and test_rubric_alignment.py. Score 3/3 for the assessed C3 model/data-structure level; VM traffic evidence remains separate.',
+        'com11': 'Member A led IRCMessage, stream framing, numerics and protocol validation; also reviewed integration boundaries. 38 tests pass. Evidence: common/*.py, tests/test_protocol.py and test_rubric_alignment.py. Score 3/3 for the assessed C3 model/data-structure level; VM traffic evidence remains separate.',
         'com21': 'Module docs, type hints, focused comments and tests included. See functionality and distribution PDFs. Not a midterm scored item.',
-        'bot11': 'Student A participated in the Bot/server protocol contract and regression review; D/E implemented the Bot transport. IPv6, NICK/USER, PING/PONG and reconnect were checked on the supplied VM setup. The CPU measurement is recorded in the E4 notes. Score 5/5 for the assessed E4 scope.',
-        'bot21': 'Student A reviewed JOIN/NAMES numerics and member-event integration; D/E implemented Bot state. Snapshot and JOIN/PART/QUIT/NICK updates are tested. Score 2/2 for F2 in the mid-project scope; live HexChat evidence is supplemental.',
+        'bot11': 'Member A participated in the Bot/server protocol contract and regression review; D/E implemented the Bot transport. IPv6, NICK/USER, PING/PONG and reconnect were checked on the supplied VM setup. The CPU measurement is recorded in the E4 notes. Score 5/5 for the assessed E4 scope.',
+        'bot21': 'Member A reviewed JOIN/NAMES numerics and member-event integration; D/E implemented Bot state. Snapshot and JOIN/PART/QUIT/NICK updates are tested. Score 2/2 for F2 in the mid-project scope; live HexChat evidence is supplemental.',
         'bot31': 'Private random facts from bot/data/facts.txt implemented. HexChat private-tab evidence needs confirmation. Outside midterm score.',
         'bot41': '!hello and !slap [user] implemented and unit-tested. HexChat display evidence needs confirmation. Outside midterm score.',
         'bot51': '!who uses IRC ISON and numeric 303 to check known members online. Outside midterm score.',
-        'srv11': 'Student A participated in the IPv6 protocol/integration review; B/C implemented server sessions and registration. Two-client operation was checked with the Ubuntu server and HexChat clients. Score 5/5 for J3 in the mid-project scope.',
-        'srv21': 'Student A reviewed numeric error contracts and malformed-input tests; B/C implemented handlers and cleanup. Unknown commands, nickname errors, 412/417 cases and idle PING cleanup are covered. Score 3/3 for K3 in the mid-project scope; final K4/K5 evidence is outside this submission.',
+        'srv11': 'Member A participated in the IPv6 protocol/integration review; B/C implemented server sessions and registration. Two-client operation was checked with the Ubuntu server and HexChat clients. Score 5/5 for J3 in the mid-project scope.',
+        'srv21': 'Member A reviewed numeric error contracts and malformed-input tests; B/C implemented handlers and cleanup. Unknown commands, nickname errors, 412/417 cases and idle PING cleanup are covered. Score 3/3 for K3 in the mid-project scope; final K4/K5 evidence is outside this submission.',
         'srv31': 'Private routing verified on IPv6 loopback. HexChat display evidence needs confirmation. Outside midterm score.',
         'srv41': 'JOIN/PART/NAMES/QUIT and cleanup implemented. Local tests pass; HexChat evidence needs confirmation. Outside midterm score.',
         'srv51': 'Same-channel broadcast and recipient filtering implemented. Local integration passes. Outside midterm score.',
@@ -173,8 +172,8 @@ def assessment_notes():
     pdf('group_04_assessment_notes.pdf', [
         [('Title', 'Group 4 Assessment Rationale'),
          ('BodyText', 'Supporting notes for the official editable marking sheet. Proposed mid-project total: C 3 + E 5 + F 2 + J 5 + K 3 = 18/18. This is a group proposal, subject to staff moderation and the evidence limitations below. Individual contribution is separate from the functionality score.'),
-         ('Heading2', 'Student A Kun Qian - contribution scope'),
-         ('BodyText', 'The group clarified that A did substantial work and participated in nearly every area, beyond the original common-only allocation. The revised distribution records common responsibility plus shared participation across Bot and server; A is ticked alongside D/E for Bot items and B/C for server items. Contributor ticks record shared participation. For this mid-project submission, the group requested an equal 20% contribution split for all five students in each proposition row. Exact function authorship remains to be confirmed.'),
+         ('Heading2', 'Member A Kun Qian - contribution scope'),
+         ('BodyText', 'The group clarified that A did substantial work and participated in nearly every area, beyond the original common-only allocation. The revised distribution records common responsibility plus shared participation across Bot and server; A is ticked alongside D/E for Bot items and B/C for server items. Contributor ticks record shared participation. For this mid-project submission, the group requested an equal 20% contribution split for all five members in each proposition row. Exact function authorship remains to be confirmed.'),
          ('Heading2', 'C - Protocol modelling: 3/3'),
          ('BodyText', 'C1-C3 require the necessary structures to be defined, complete and correctly used. IRCMessage stores prefix, command and parameters, with parse/serialize methods; IRCStreamDecoder models incomplete TCP input and extracts CRLF-framed messages. Common name validation and numerics are used by server and Bot. tests/test_protocol.py covers trailing text, fragmentation, coalescing, malformed input and length boundaries. These support the assessed 3 points. Parser/response separation is additional progress toward final C4/C5, not extra mid-project points.'),
          ('Heading2', 'E - Bot connection: 5/5'),
@@ -187,7 +186,7 @@ def assessment_notes():
          ('Heading2', 'K - Errors and normal traffic: 3/3'),
          ('BodyText', 'Mid-project K1, partial K2 and partial K3 award one point each. Unknown commands receive 421; invalid nicknames receive 432 and collisions receive 433. tests/test_handlers.py and test_rubric_alignment.py exercise error responses, safe serialization and continued registration. The group also checked normal commands and error responses through the Ubuntu server and HexChat clients. Parameter errors, malformed stream isolation and 30s PING/60s idle removal are additional progress, excluded from this mid-project score.'),
          ('Heading2', 'D/G/H/I/L/M/N - additional progress'),
-         ('BodyText', 'Documentation, private facts, !hello/!slap, ISON-based !who, direct messaging, JOIN/PART and channel routing are implemented and covered by the supplied code and tests. These rows remain outside the mid-project 18 points. Student A is recorded as a shared participant in these areas following the group clarification; B/C and D/E remain contributors to their modules. An absent !slap target falls back to the sender as the brief requests, despite the rubric wording excluding the sender; this exception is disclosed.'),
+         ('BodyText', 'Documentation, private facts, !hello/!slap, ISON-based !who, direct messaging, JOIN/PART and channel routing are implemented and covered by the supplied code and tests. These rows remain outside the mid-project 18 points. Member A is recorded as a shared participant in these areas following the group clarification; B/C and D/E remain contributors to their modules. An absent !slap target falls back to the sender as the brief requests, despite the rubric wording excluding the sender; this exception is disclosed.'),
          ('Heading2', 'Evidence boundary and individual self-assessment'),
          ('BodyText', 'test_results.txt records 38 passing local tests. miniircd_results.txt records upstream miniircd on IPv6 loopback, not the assessed VMs or HexChat. Prior VM/GUI success is a group statement; attach its existing records and repeat checks after changes. Exact function authorship and assessed-VM CPU measurements remain outstanding. Each proposition row now records the requested 20% contribution per member. Functionality scores assess the group implementation separately from the contribution allocation.'),
          ('BodyText', 'Rubric A assesses accuracy and coherence of individual self-assessment. These notes explain the basis for the proposal and its limits; the entire official Moderation section remains for staff. Sources: supplied marking-sheet.pdf and 4. Marking Criteria.pdf; project source, test_results.txt and miniircd_results.txt. Contribution scope also uses the group\'s clarification about A.')]
@@ -195,34 +194,10 @@ def assessment_notes():
 
 
 def package_core():
-    SOURCE.mkdir(parents=True, exist_ok=True)
-    # Remove stale development copies only inside the generated submission.
-    for directory in ('tests', 'scripts', 'docs'):
-        target = SOURCE / directory
-        assert target.resolve().parent == SOURCE.resolve()
-        if target.exists():
-            shutil.rmtree(target)
-    for directory in ('bot', 'server', 'common'):
-        shutil.copytree(ROOT / directory, SOURCE / directory, dirs_exist_ok=True,
-                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
-    shutil.copy2(ROOT / 'README.md', SOURCE / 'README.md')
-    for cache in SOURCE.rglob('__pycache__'):
-        if cache.is_dir():
-            shutil.rmtree(cache)
-    with zipfile.ZipFile(OUT / 'group_04_source.zip', 'w', zipfile.ZIP_DEFLATED) as archive:
-        for file in sorted(SOURCE.rglob('*')):
-            relative = file.relative_to(SOURCE)
-            if file.is_file() and '__pycache__' not in relative.parts and file.suffix != '.pyc':
-                if relative.parts[0] in {'bot', 'server', 'common', 'README.md'}:
-                    archive.write(file, relative.as_posix())
+    # Keep document generation separate from the user-requested code-only ZIP.
+    subprocess.run([sys.executable, str(ROOT / 'scripts' / 'package_code.py')], check=True)
     target = OUT.parent / 'group_04_midproject.zip'
-    with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as archive:
-        for file in sorted((OUT / 'code').rglob('*')):
-            if file.is_file() and '__pycache__' not in file.relative_to(OUT / 'code').parts and file.suffix != '.pyc':
-                archive.write(file, file.relative_to(OUT.parent).as_posix())
-        for name in ('group_04_marking.pdf', 'group_04_team_and_functionality.docx'):
-            file = OUT / name
-            archive.write(file, file.relative_to(OUT.parent).as_posix())
+    shutil.copy2(target, OUT / 'group_04_source.zip')
     for file in (OUT / 'group_04_source.zip', target):
         with zipfile.ZipFile(file) as archive:
             assert archive.testzip() is None
@@ -232,8 +207,8 @@ def package_core():
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     SOURCE.mkdir(exist_ok=True)
-    # The submitted source archive contains only the runnable coursework
-    # implementation. Tests, VM helpers and packaging material stay outside it.
+    # The source archive contains only the runnable IRC implementation.
+    # Tests, VM helpers and packaging material stay outside it.
     for directory in ['bot', 'server', 'common']:
         shutil.copytree(ROOT / directory, SOURCE / directory, dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
@@ -248,14 +223,14 @@ def main():
     pdf('group_04_distribution.pdf', [[
         ('Title', 'Group 4 Division of Labor'),
         ('BodyText', 'The project contains shared IRC protocol code, a concurrent IPv6 server and a command Bot. The following module allocation is recorded in the group presentation. Members sharing a module share its code and documentation responsibility.'),
-        ('Heading2', 'Student A Kun Qian'),
-        ('BodyText', 'Student A is responsible for the common protocol layer and its documentation: common/irc_message.py models and serializes IRC messages; common/stream.py frames the TCP stream; common/protocol.py validates names; common/numerics.py defines replies and errors. The group also confirms substantial participation by A across the Bot and server work. The shared protocol layer supports registration, channels, messaging and error processing. Supporting project evidence: tests/test_protocol.py and tests/test_rubric_alignment.py; these tests demonstrate behavior, not individual authorship.'),
-        ('Heading2', 'Students B and C Yibo Xu and Jingsong She'),
+        ('Heading2', 'Member A Kun Qian'),
+        ('BodyText', 'Member A is responsible for the common protocol layer and its documentation: common/irc_message.py models and serializes IRC messages; common/stream.py frames the TCP stream; common/protocol.py validates names; common/numerics.py defines replies and errors. The group also confirms substantial participation by A across the Bot and server work. The shared protocol layer supports registration, channels, messaging and error processing. Supporting project evidence: tests/test_protocol.py and tests/test_rubric_alignment.py; these tests demonstrate behavior, not individual authorship.'),
+        ('Heading2', 'Members B and C Yibo Xu and Jingsong She'),
         ('BodyText', 'B/C jointly developed the server with A participating across the protocol and integration work. B leads server/server.py accept/send/disconnect/stop and ClientSession.run/send/close. C leads IRCHandlers.handle, registration, JOIN/PART/NAMES, PRIVMSG, PING/PONG, ISON/QUIT and IRCState identity/channel operations. Both reviewed tests and error paths; these are responsibility areas within joint development, not claims of sole authorship.'),
-        ('Heading2', 'Students D and E Tianxing Wei and Li Yuzong'),
+        ('Heading2', 'Members D and E Tianxing Wei and Li Yuzong'),
         ('BodyText', 'D/E jointly developed the Bot with A participating across the protocol and regression work. D leads BotClient.run/run_once/send/handle/close/stop, including IPv6 registration, PING/PONG and reconnect behavior. E leads BotState snapshots/events, BotCommandProcessor.channel_command/private_reply and bot/cli.py, including !hello, !slap, !who and facts. Both reviewed tests and miniircd behavior; these are responsibility areas within joint development, not claims of sole authorship.'),
         ('Heading2', 'Contribution confirmation'),
-        ('BodyText', 'A/B/C/D/E map to the same students in the marking sheet. Student A participates in every area and leads common. B/C remain the server pair and D/E remain the Bot pair. The group requested an equal 20% contribution split for each member; every proposition row totals 100%. The function areas above document practical responsibility within joint development.'),
+        ('BodyText', 'A/B/C/D/E map to the same members in the marking sheet. Member A participates in every area and leads common. B/C remain the server pair and D/E remain the Bot pair. The group requested an equal 20% contribution split for each member; every proposition row totals 100%. The function areas above document practical responsibility within joint development.'),
         ('BodyText', 'Allocation sources: the original presentation module split, the group clarification of A\'s participation across modules, and the requested 20% contribution split. The revised distribution supersedes the narrower presentation split.'),
     ]])
     assessment_notes()
@@ -284,7 +259,7 @@ def main():
          ('Heading2', 'Member tracking'),
          ('BodyText', 'The initial member list is collected across 353 replies and committed at 366. JOIN, PART, QUIT and NICK update membership. Events arriving during a NAMES snapshot are retained and replayed so a departed user does not reappear when the snapshot finishes. State is cleared after reconnecting.'),
          ('Heading2', 'Commands and private replies'),
-         ('BodyText', '!hello greets the sender. !slap with no argument selects another eligible member, excluding the Bot and sender when possible; with no eligible member it falls back to the sender. !slap nickname chooses a present non-Bot target and otherwise falls back to the sender. These decisions are covered by unit tests.'),
+         ('BodyText', '!hello greets the sender. !slap with no argument selects a member other than the sender and Bot, or reports no eligible member. Explicit self/Bot targets are rejected. An absent named target falls back to the sender as required by the brief. These decisions are covered by unit tests.'),
          ('BodyText', '!who uses IRC ISON and numeric 303 to check known channel members online and reports names and a count. Test it against miniircd as required by the rubric. Private PRIVMSG messages receive a random fact from bot/data/facts.txt; a missing facts file has a fallback sentence.'),
          ('Heading2', 'Configuration'),
          ('BodyText', 'The Bot accepts --host, --port, --name and --channel. Defaults are fc00:1337::17, 6667, SuperBot and #hello. The server accepts --host, --port and --name. The supplied Ubuntu address is fc00:1337::17/96 and Windows address is fc00:1337::19/96.')],
@@ -313,7 +288,7 @@ def main():
         ('Heading2', '2 Verification against miniircd and HexChat'),
         ('BodyText', 'Local integration proves delivery between synthetic IPv6 clients but does not prove how HexChat displays numerics, private tabs or membership, nor how the Bot behaves with miniircd. The Bot depends on welcome 001, NAMES 353/366 and ISON 303. Test the Bot with miniircd on the supplied Ubuntu IPv6 address and save HexChat screenshots and logs.'),
         ('Heading2', '3 Transport security extension'),
-        ('BodyText', 'The submitted IRC traffic uses ordinary TCP and provides no transport encryption or server authentication. A future TLS listener could protect message confidentiality and integrity without changing the IRC message grammar. Wrap the socket with Python ssl, configure certificates and enable certificate validation on clients. Test certificate failures, reconnect behavior and stream framing over TLS. This is an optional extension outside the coursework requirement; RFC 2812 describes the application messages while TLS protects their transport.'),
+        ('BodyText', 'The submitted IRC traffic uses ordinary TCP and provides no transport encryption or server authentication. A future TLS listener could protect message confidentiality and integrity without changing the IRC message grammar. Wrap the socket with Python ssl, configure certificates and enable certificate validation on clients. Test certificate failures, reconnect behavior and stream framing over TLS. This is an optional extension outside the current implementation scope; RFC 2812 describes the application messages while TLS protects their transport.'),
     ]])
     shutil.copy2(ROOT / 'IRC_Midterm_Redesigned_EN.pptx', OUT / 'group_04_presentation.pptx')
     shutil.copy2(ROOT / 'IRC_Midterm_Redesigned_English_Script.md', OUT / 'presentation_script_en.md')
@@ -321,7 +296,7 @@ def main():
     shutil.copy2(ROOT / 'submission_tools' / 'miniircd_results.txt', OUT / 'miniircd_results.txt')
     (OUT / 'code_alignment_audit.txt').write_text(
         'Official criteria alignment audit - 8 October 2026\n\n'
-        'CHANGED: PING at 30s; remove clients with no command/PONG for more than 60s; monitor scan 1s.\n'
+        'CHANGED: PING after 30s without a command; remove clients if a matching PONG is absent after another 30s; monitor scan 1s.\n'
         'CHANGED: Bot retries invalid/occupied nicknames before registration; accepts the server-confirmed nickname.\n'
         'CORRECTED: Bot !time reports local time; !who is the extra IRC feature using ISON/303.\n'
         'ADDED: !who uses ISON/303 (a new IRC command for criterion I), tested against upstream miniircd.\n'
@@ -331,7 +306,7 @@ def main():
         'IMPLEMENTED: numeric errors, per-session input failure isolation, locked shared state and disconnect cleanup.\n'
         'VERIFIED: 47 automated tests pass; miniircd integration output attached.\n'
         'GROUP CONFIRMED: previous supplied VM, miniircd and HexChat acceptance tests.\n'
-        'CPU VERIFIED: current source on Ubuntu VM, IPv6 ::1, 60 seconds with two clients and one Bot; server average 0.283%, peak 2%; Bot average 0.100%, peak 1%. See cpu_evidence. Windows VM Bot CPU is not measured by this Ubuntu run.\n'
+        'HISTORICAL CPU RECORD: an earlier Ubuntu VM run reported server average 0.283%, peak 2%, and Bot average 0.100%, peak 1%, over 60 seconds with two clients and one Bot on IPv6 ::1. These values do not verify subsequent source changes or Windows Bot CPU; retain the original source hashes and measurement evidence.\n'
         'SUBMISSION: names and module contributors filled; midterm self-assessment 18/18; staff moderation blank.\n'
         'CONTRIBUTIONS: requested equal 20% per member in all five proposition rows; each row totals 100%. Function responsibility is recorded by function area; implementation was joint.\n'
         'PRESENTATION: slides/scripts now describe !who/ISON and local-clock !time consistently with the code.\n', encoding='utf-8')
@@ -343,12 +318,12 @@ def main():
         '2. All contribution cells are filled with the requested 20% per member; each proposition row totals 100%.\n'
         '3. Group mark is filled at 18/18 (C=3, E=5, F=2, J=5, K=3). A up to A4 is assessed separately by staff.\n'
         '   The sheet says F up to F3, but the rubric stars only F1/F2; scoring F3 would conflict with the 18-point total. Confirm with the lecturer if needed.\n'
-        '4. A is recorded as a contributor across common, Bot and server following the group clarification. Confirm the exact function-level split, names and any required student IDs. The distribution supersedes the narrower presentation allocation.\n'
+        '4. A is recorded as a contributor across common, Bot and server following the group clarification. Confirm the exact function-level split, names and any required member identifiers. The distribution supersedes the narrower presentation allocation.\n'
         '5. The group confirms prior VM/miniircd/HexChat tests. Attach existing records and disclose external resources. Recheck new changes on VMs and record CPU load.\n'
         '6. Keep the entire Moderation section blank. D/G/H/I/L/M/N are additional progress evidence, not part of the midterm 18.\n'
-        '7. After editing the unpacked documents, rebuild the outer ZIP so it contains the latest files.\n\n'
+        '7. Documentation is retained separately. The current ZIP contains runtime code and facts.txt only, as requested.\n\n'
         'Naming follows the project brief: group_04_marking.pdf, group_04_distribution.pdf, group_04_comment.pdf, group_04_source.zip.\n'
-        'The submission announcement requests one outer ZIP including documentation.\n'
+        'The current code-only packaging follows the group request; it does not combine documentation into the ZIP.\n'
         'No video is required by that announcement.\n', encoding='utf-8')
     package_core()
 

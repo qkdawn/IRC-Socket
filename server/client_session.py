@@ -5,17 +5,21 @@ from __future__ import annotations
 import logging
 import socket
 import threading
+from typing import TYPE_CHECKING
 
 from common.irc_message import IRCMessage
 from common.stream import IRCStreamDecoder, IRCStreamError
 
 from .state import ClientState
 
+if TYPE_CHECKING:
+    from .server import IRCServer
+
 logger = logging.getLogger(__name__)
 
 
 class ClientSession:
-    def __init__(self, server, sock: socket.socket, address: tuple) -> None:
+    def __init__(self, server: IRCServer, sock: socket.socket, address: tuple) -> None:
         self.server = server
         self.socket = sock
         self.address = address
@@ -25,10 +29,22 @@ class ClientSession:
         self.closed = threading.Event()
 
     def start(self) -> None:
-        self.server.state.add_client(self.client)
-        threading.Thread(
-            target=self.run, name=f"irc-client-{self.address}", daemon=True
-        ).start()
+        with self.server.state.lock:
+            # Shutdown snapshots clients under the same lock, so an accepted
+            # socket cannot register after that snapshot and escape cleanup.
+            if self.server.stopping.is_set():
+                self.close()
+                return
+            self.server.state.add_client(self.client)
+        try:
+            threading.Thread(
+                target=self.run, name=f"irc-client-{self.address}", daemon=True
+            ).start()
+        except BaseException:
+            self.server.disconnect(
+                self.client, "Session startup failed", announce=False
+            )
+            raise
 
     def send(self, msg: IRCMessage) -> None:
         payload = msg.to_bounded_bytes(
@@ -39,8 +55,8 @@ class ClientSession:
                 self.socket.sendall(payload)
 
     def run(self) -> None:
-        self.socket.settimeout(1.0)
         try:
+            self.socket.settimeout(1.0)
             while not self.closed.is_set() and not self.server.stopping.is_set():
                 try:
                     # A timeout lets the thread notice server shutdown without
@@ -59,9 +75,9 @@ class ClientSession:
                     self.server.send_error_line(self.client, "Malformed IRC line")
                     break
                 for incoming in messages:
-                    self.server.handlers.handle(self.client, incoming)
                     if self.closed.is_set():
                         break
+                    self.server.handlers.handle(self.client, incoming)
         except (ConnectionError, OSError) as exc:
             logger.info("IRC client disconnected: %s (%s)", self.address, exc)
         except Exception:
