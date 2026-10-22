@@ -759,7 +759,7 @@ class BotDeadlineTests(unittest.TestCase):
         request = message("PRIVMSG", "#hello", "!who", prefix="alice!u@host")
         bot.handle(request)
         bot.handle(message("421", "SuperBot", "ISON", "Unknown command"))
-        self.assertIsNone(bot.queries._who_channel)
+        self.assertIsNone(bot.queries._who)
         bot.send.reset_mock()
         bot.handle(request)
         self.assertEqual(bot.send.call_args.args[0].command, "ISON")
@@ -787,7 +787,7 @@ class BotDeadlineTests(unittest.TestCase):
         bot.state.replace_names("#hello", [f"member{index}" for index in range(30)])
         request = message("PRIVMSG", "#hello", "!who", prefix="alice!u@host")
         bot.handle(request)
-        batches = bot.queries._who_pending
+        batches = bot.send.call_count
         self.assertGreater(batches, 1)
         bot.handle(message("421", "SuperBot", "ISON", "Unknown command"))
         bot.send.reset_mock()
@@ -795,7 +795,7 @@ class BotDeadlineTests(unittest.TestCase):
         bot.send.assert_not_called()
         for _ in range(batches - 1):
             bot.handle(message("303", "SuperBot", "member0"))
-        self.assertIsNone(bot.queries._who_channel)
+        self.assertIsNone(bot.queries._who)
         replies = [call.args[0].params[-1] for call in bot.send.call_args_list]
         self.assertEqual(replies, ["WHO unavailable: server rejected ISON."])
         bot.send.reset_mock()
@@ -815,7 +815,7 @@ class BotDeadlineTests(unittest.TestCase):
                     (15, b"PING :healthy\r\n"),
                 ],
             )
-        self.assertIsNone(bot.queries._who_channel)
+        self.assertIsNone(bot.queries._who)
 
     def test_missing_names_end_times_out_and_discards_pending_commands(self):
         bot = BotClient()

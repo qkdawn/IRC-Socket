@@ -50,14 +50,13 @@ class BotQueryTests(unittest.TestCase):
                     "#room", {"alice"}, "SuperBot", "irc.local", 100
                 )
                 self.assertIsNone(self.queries.handle(reply, "SuperBot"))
-                self.assertEqual(self.queries._who_pending, 1)
-        self.assertEqual(
-            self.queries.handle(message("303", "superbot", "alice"), "SuperBot"),
-            [
-                message("PRIVMSG", "#room", "WHO member: alice"),
-                message("PRIVMSG", "#room", "WHO complete: 1 members"),
-            ],
-        )
+                self.assertEqual(
+                    self.queries.handle(message("303", "superbot", "alice"), "SuperBot"),
+                    [
+                        message("PRIVMSG", "#room", "WHO member: alice"),
+                        message("PRIVMSG", "#room", "WHO complete: 1 members"),
+                    ],
+                )
 
     def test_query_deadline_is_driven_by_supplied_time(self):
         for query in ("ISON", "LIST", "LUSERS"):
@@ -73,7 +72,12 @@ class BotQueryTests(unittest.TestCase):
                     self.queries.check_timeouts(130)
 
     def test_reconnect_reset_discards_every_query_and_partial_result(self):
-        self.queries.start_who("#room", {"alice"}, "SuperBot", "irc.local", 100)
+        self.queries.start_who(
+            "#room", {f"member{index}" for index in range(30)},
+            "SuperBot", "irc.local", 100,
+        )
+        self.queries.handle(message("303", "SuperBot", "stale"), "SuperBot")
+        self.queries.handle(message("263", "SuperBot", "ISON", "Throttled"), "SuperBot")
         self.queries.start("LIST", "#room", 100)
         self.queries.start("LUSERS", "#room", 100)
         self.queries.handle(message("322", "SuperBot", "#stale", "1", ""), "SuperBot")
@@ -90,6 +94,46 @@ class BotQueryTests(unittest.TestCase):
             self.queries.handle(message("323", "SuperBot", "End of LIST"), "SuperBot"),
             [message("PRIVMSG", "#new", "CHANNELS complete: 0 channels (showing 0)")],
         )
+        self.assertEqual(
+            self.queries.start_who("#new", {"bob"}, "SuperBot", "irc.local", 1000),
+            [message("ISON", "bob")],
+        )
+        self.assertEqual(
+            self.queries.handle(message("303", "SuperBot", "bob"), "SuperBot"),
+            [
+                message("PRIVMSG", "#new", "WHO member: bob"),
+                message("PRIVMSG", "#new", "WHO complete: 1 members"),
+            ],
+        )
+
+    def test_ison_timeout_discards_partial_results_and_failure_before_retry(self):
+        requests = self.queries.start_who(
+            "#room", {f"member{index}" for index in range(30)},
+            "SuperBot", "irc.local", 100,
+        )
+        self.assertGreater(len(requests), 2)
+        self.assertEqual(
+            self.queries.handle(message("303", "SuperBot", "stale"), "SuperBot"), []
+        )
+        self.assertEqual(
+            self.queries.handle(message("263", "SuperBot", "ISON", "Throttled"), "SuperBot"),
+            [],
+        )
+        with self.assertRaisesRegex(TimeoutError, "ISON"):
+            self.queries.check_timeouts(130)
+        self.assertEqual(
+            self.queries.start_who("#new", {"bob"}, "SuperBot", "irc.local", 1000),
+            [message("ISON", "bob")],
+        )
+        self.queries.check_timeouts(1029.999)
+        self.assertEqual(
+            self.queries.handle(message("303", "SuperBot", "bob"), "SuperBot"),
+            [
+                message("PRIVMSG", "#new", "WHO member: bob"),
+                message("PRIVMSG", "#new", "WHO complete: 1 members"),
+            ],
+        )
+        self.queries.check_timeouts(1030)
 
     def test_ison_failure_drains_batches_before_accepting_another_query(self):
         requests = self.queries.start_who(

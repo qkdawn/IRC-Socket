@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from collections.abc import Callable
+from functools import partial
 import socket
 import threading
 import time
@@ -54,6 +56,12 @@ class BotClient:
         self.state = BotState()
         self.commands = BotCommandProcessor(self.nickname)
         self.queries = BotQueries()
+        self._action_handlers: dict[CommandAction, Callable[[IRCMessage], None]] = {
+            CommandAction.WAIT_FOR_NAMES: self._defer_command,
+            CommandAction.REQUEST_WHO: self._request_who,
+            CommandAction.REQUEST_CHANNELS: partial(self._request_query, "LIST"),
+            CommandAction.REQUEST_NETWORK: partial(self._request_query, "LUSERS"),
+        }
         self.socket: socket.socket | None = None
         self.send_lock = threading.Lock()
         self.stopping = threading.Event()
@@ -241,6 +249,7 @@ class BotClient:
                 self.nickname = new
                 self.commands.nickname = new
             return
+
     def _handle_privmsg(self, incoming: IRCMessage) -> None:
         if len(incoming.params) < 2 or not incoming.prefix:
             return
@@ -257,30 +266,36 @@ class BotClient:
             self.state.members(target),
             members_complete=not self.state.has_pending_names(target),
         )
-        if response is CommandAction.WAIT_FOR_NAMES:
-            if len(self._pending_commands) < self.MAX_PENDING_COMMANDS:
-                self._pending_commands.append(incoming)
-            else:
-                self.send(
-                    message(
-                        "PRIVMSG",
-                        target,
-                        "Channel roster is loading and the command queue is full; please retry.",
-                    )
-                )
-        elif response is CommandAction.REQUEST_WHO:
-            self._send_query_messages(self.queries.start_who(
-                target, self.state.members(target), self.nickname,
-                self._server_name, time.monotonic(),
-            ))
-        elif response in {
-            CommandAction.REQUEST_CHANNELS,
-            CommandAction.REQUEST_NETWORK,
-        }:
-            query = "LIST" if response is CommandAction.REQUEST_CHANNELS else "LUSERS"
-            self._send_query_messages(self.queries.start(query, target, time.monotonic()))
+        if isinstance(response, CommandAction):
+            self._action_handlers[response](incoming)
         elif response:
             self.send(message("PRIVMSG", target, response))
+
+    def _defer_command(self, incoming: IRCMessage) -> None:
+        if len(self._pending_commands) < self.MAX_PENDING_COMMANDS:
+            self._pending_commands.append(incoming)
+            return
+        self.send(
+            message(
+                "PRIVMSG",
+                incoming.params[0],
+                "Channel roster is loading and the command queue is full; please retry.",
+            )
+        )
+
+    def _request_who(self, incoming: IRCMessage) -> None:
+        channel = incoming.params[0]
+        self._send_query_messages(
+            self.queries.start_who(
+                channel, self.state.members(channel), self.nickname,
+                self._server_name, time.monotonic(),
+            )
+        )
+
+    def _request_query(self, command: str, incoming: IRCMessage) -> None:
+        self._send_query_messages(
+            self.queries.start(command, incoming.params[0], time.monotonic())
+        )
 
     def _send_query_messages(self, outgoing: list[IRCMessage]) -> None:
         for reply in outgoing:

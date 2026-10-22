@@ -118,7 +118,7 @@ class BotTests(unittest.TestCase):
                     bot.handle(request)
 
                     bot.send.assert_not_called()
-                    self.assertIsNone(bot.queries._who_channel)
+                    self.assertIsNone(bot.queries._who)
                     bot.handle(
                         message("353", "SuperBot", "=", "#hello", "SuperBot alice bob")
                     )

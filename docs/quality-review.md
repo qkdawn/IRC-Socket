@@ -91,11 +91,15 @@ updates, error handling, documentation wording and packaged runtime sources.
   Handlers fully annotate client parameters and access fixed state fields
   directly. Bot slap selection, query rejection and LIST completion use focused
   helpers without changing their outputs or query state transitions.
+- Bot command actions dispatch through one typed handler table with focused
+  executors for deferral, ISON and shared LIST/LUSERS requests. One `_WhoQuery`
+  object owns an active ISON query's lifecycle; completion, timeout and reconnect
+  release it together instead of resetting five independent fields.
 
 ## Verification
 
-- Windows `python -m pytest -q`: 163 tests and 86 subtests passed.
-- Windows `python -m unittest discover -q`: 163 tests passed.
+- Windows `python -m pytest -q`: 164 tests and 86 subtests passed.
+- Windows `python -m unittest discover -q`: 164 tests passed.
 - Before the criterion I extension, Ubuntu WSL2 `python3 -m unittest discover`
   passed the then-current 106 tests; it has not been rerun for this extension.
 - `ruff check .` and `git diff --check`: passed.

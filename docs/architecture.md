@@ -62,12 +62,21 @@ their batching, pending destinations, numeric replies, result limits and
 deadlines. Its inputs are messages, context values and explicit monotonic time;
 its output is a list of IRC messages, with `None` indicating an unrelated event.
 It imports neither sockets nor the client, membership state or command processor.
+An active ISON batch group is represented by one `_WhoQuery` object containing
+its destination, start time, remaining batches, accumulated names and failure
+status. No active query is represented by `None`. Completion, timeout and
+reconnection discard the whole object, so a later request starts with fresh
+results and a fresh deadline.
 
 `BotClient` supplies identity/membership snapshots, obtains time, transmits the
 generated messages and handles reconnects. It resets the query component on a
 new connection. Registration/keepalive, membership events and PRIVMSG dispatch
 have separate methods. Text chunking remains at the delivery boundary so long
 facts and network summaries share the same UTF-8-safe relay budget.
+PRIVMSG processing dispatches `CommandAction` values through one typed handler
+table. Deferred commands, ISON requests and other queries have dedicated
+execution methods; LIST and LUSERS share the same query executor with their
+command bound in the table. Text replies continue through the normal send path.
 
 LIST and LUSERS track independent destinations and deadlines; LIST stores at
 most 10 entries while counting the full result. The server releases its state

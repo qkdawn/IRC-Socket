@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 from common.irc_message import IRCMessage, message
 from common.numerics import RPL_LIST, RPL_LISTEND, RPL_LUSERCLIENT
 from common.protocol import irc_casefold, is_channel
+
+
+@dataclass
+class _WhoQuery:
+    """One ISON batch group backing a channel's !who request."""
+
+    channel: str
+    started: float
+    pending: int
+    names: set[str] = field(default_factory=set)
+    failed: bool = False
 
 
 class BotQueries:
@@ -13,26 +26,15 @@ class BotQueries:
     MAX_LISTED_CHANNELS = 10
 
     def __init__(self) -> None:
-        self._who_channel: str | None = None
-        self._who_names: set[str] = set()
-        self._who_pending = 0
-        self._who_started: float | None = None
-        self._who_failed = False
+        self._who: _WhoQuery | None = None
         self._extra_queries: dict[str, tuple[str, float]] = {}
         self._listed_channels: list[tuple[str, str]] = []
         self._listed_count = 0
 
     def reset(self) -> None:
         """Discard all results and deadlines from a previous connection."""
-        self._reset_who()
+        self._who = None
         self._reset_extra_queries()
-
-    def _reset_who(self) -> None:
-        self._who_channel = None
-        self._who_names.clear()
-        self._who_pending = 0
-        self._who_started = None
-        self._who_failed = False
 
     def _reset_extra_queries(self) -> None:
         self._extra_queries.clear()
@@ -47,10 +49,8 @@ class BotQueries:
         server_name: str,
         now: float,
     ) -> list[IRCMessage]:
-        if self._who_channel is not None:
+        if self._who is not None:
             return []
-        self._who_channel = channel
-        self._who_started = now
         # miniircd's WHO reply has an unescaped IPv6 host parameter. ISON
         # confirms known members online without depending on that field.
         batches: list[list[str]] = []
@@ -70,7 +70,7 @@ class BotQueries:
                 selected = []
             selected.append(name)
         batches.append(selected or [nickname])
-        self._who_pending = len(batches)
+        self._who = _WhoQuery(channel=channel, started=now, pending=len(batches))
         return [message("ISON", *batch) for batch in batches]
 
     def start(self, command: str, channel: str, now: float) -> list[IRCMessage]:
@@ -89,10 +89,10 @@ class BotQueries:
 
     def check_timeouts(self, now: float) -> None:
         if (
-            self._who_started is not None
-            and now - self._who_started >= self.WHO_TIMEOUT
+            self._who is not None
+            and now - self._who.started >= self.WHO_TIMEOUT
         ):
-            self._reset_who()
+            self._who = None
             # The caller reconnects so late replies cannot complete a new query.
             raise TimeoutError("ISON query timed out")
         for command, (_, started) in self._extra_queries.items():
@@ -110,39 +110,34 @@ class BotQueries:
         outgoing = self._handle_extra_reply(incoming)
         if outgoing is not None:
             return outgoing
+        who = self._who
+        if who is None:
+            return None
         if (
             incoming.command in {"263", "417", "421", "461"}
             and len(incoming.params) >= 2
             and incoming.params[1].upper() == "ISON"
-            and self._who_channel is not None
         ):
-            self._who_failed = True
-            return self._finish_who_batch()
-        if (
-            incoming.command == "303"
-            and self._who_channel is not None
-            and len(incoming.params) >= 2
-        ):
-            self._who_names.update(incoming.params[-1].split())
-            return self._finish_who_batch()
+            who.failed = True
+            return self._finish_who_batch(who)
+        if incoming.command == "303" and len(incoming.params) >= 2:
+            who.names.update(incoming.params[-1].split())
+            return self._finish_who_batch(who)
         return None
 
-    def _finish_who_batch(self) -> list[IRCMessage]:
-        self._who_pending -= 1
-        if self._who_pending > 0:
+    def _finish_who_batch(self, who: _WhoQuery) -> list[IRCMessage]:
+        who.pending -= 1
+        if who.pending > 0:
             return []
-        channel = self._who_channel
-        assert channel is not None
-        names = sorted(self._who_names)
-        failed = self._who_failed
-        self._reset_who()
-        if failed:
+        self._who = None
+        if who.failed:
             return [
-                message("PRIVMSG", channel, "WHO unavailable: server rejected ISON.")
+                message("PRIVMSG", who.channel, "WHO unavailable: server rejected ISON.")
             ]
+        names = sorted(who.names)
         return [
-            *(message("PRIVMSG", channel, f"WHO member: {name}") for name in names),
-            message("PRIVMSG", channel, f"WHO complete: {len(names)} members"),
+            *(message("PRIVMSG", who.channel, f"WHO member: {name}") for name in names),
+            message("PRIVMSG", who.channel, f"WHO complete: {len(names)} members"),
         ]
 
     def _handle_extra_reply(self, incoming: IRCMessage) -> list[IRCMessage] | None:

@@ -64,6 +64,9 @@ LUSERS counts that exclude incomplete registrations. Real IPv6 integration
 verifies discovery of a channel the Bot has not joined and network-wide counts.
 The query component is also tested directly without a socket or real clock,
 including response generation, failure-batch draining, deadlines and resets.
+ISON lifecycle tests accumulate partial results and record a failed batch, then
+verify that both timeout and reconnect reset allow a fresh query with no stale
+names, failure status, destination or deadline.
 State API tests verify detached snapshots, case-insensitive filtering and
 registered counts across disconnects. A handler test supplies only state
 operations, with no storage containers or lock, to verify that boundary.
