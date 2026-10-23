@@ -55,6 +55,34 @@ class IntegrationTests(unittest.TestCase):
         self.wait_for(requester, lambda incoming: incoming.command == "PONG")
         self.assertFalse(client.disconnected)
 
+    def test_100_channel_join_and_part_complete_without_disconnect(self):
+        for attempt in range(3):
+            with self.subTest(attempt=attempt):
+                requester = self.connect(f"joining{attempt}")
+                self.wait_for(requester, lambda incoming: incoming.command == "004")
+                self.pending[requester].clear()
+                channels = [f"#{index}" for index in range(100)]
+                request = ("JOIN " + ",".join(channels) + "\r\n").encode()
+                self.assertEqual(len(request), 396)
+                requester.sendall(request)
+                for channel in channels:
+                    end = self.wait_for(requester, lambda incoming: incoming.command == "366")
+                    self.assertEqual(end.params[1], channel)
+                replies = self.pending[requester]
+                self.assertEqual(sum(msg.command == "JOIN" for msg in replies), 100)
+                self.assertEqual(sum(msg.command == "353" for msg in replies), 100)
+                self.pending[requester].clear()
+                requester.sendall(("PART " + ",".join(channels) + "\r\n").encode())
+                for channel in channels:
+                    reply = self.wait_for(requester, lambda incoming: incoming.command == "PART")
+                    self.assertEqual(reply.params[0], channel)
+                requester.sendall(b"PING :after-join-part\r\n")
+                self.wait_for(requester, lambda incoming: incoming.command == "PONG")
+                client = self.server.state.find_nick(f"joining{attempt}")
+                self.assertIsNotNone(client)
+                self.assertFalse(client.disconnected)
+                self.assertEqual(self.server.state.channels_for(client), [])
+
     def test_large_names_response_finishes_without_disconnect(self):
         requester = self.connect("query")
         self.wait_for(requester, lambda incoming: incoming.command == "004")
@@ -75,6 +103,15 @@ class IntegrationTests(unittest.TestCase):
         requester.sendall(b"PING :after-names\r\n")
         self.wait_for(requester, lambda incoming: incoming.command == "PONG")
         self.assertFalse(client.disconnected)
+
+    def test_pipelined_ping_requests_are_paced_for_a_reading_client(self):
+        requester = self.connect("pipelined")
+        self.wait_for(requester, lambda incoming: incoming.command == "004")
+        requester.sendall(b"".join(f"PING :probe-{index}\r\n".encode() for index in range(600)))
+        for index in range(600):
+            reply = self.wait_for(requester, lambda incoming: incoming.command == "PONG")
+            self.assertEqual(reply.params[-1], f"probe-{index}")
+        self.assertFalse(self.server.state.find_nick("pipelined").disconnected)
 
     def test_malformed_input_receives_error_before_connection_closes(self):
         requester = self.connect("malformed")

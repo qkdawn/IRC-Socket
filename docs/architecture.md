@@ -32,8 +32,16 @@ and an old user's PART precedes a replacement user's JOIN even when the
 nickname is reused, keeping the Bot's roster consistent with server state.
 Each session holds at most 256 pending messages and writes outside the state
 lock. A slow socket cannot stall another client's delivery. Queue overflow or
-a socket write failure closes that session and removes its routes. LIST and
-NAMES reply production uses the separate `send_reply()` interface outside the
+a socket write failure closes that session and removes its routes. Command
+processing first calls `prepare_output()`
+outside the state lock. When more than half the 256 output slots are occupied,
+the request waits up to one second for headroom before producing more output.
+JOIN, PART and NAMES repeat this check for each channel, preventing a single
+short request from exhausting its own queue with notifications. PONG and QUIT
+bypass request pacing so acknowledgements and cleanup remain immediate.
+Atomic broadcasts still enqueue without waiting under the state lock and retain
+the hard queue limit for recipients overwhelmed by other clients.
+LIST and NAMES reply production uses the separate `send_reply()` interface outside the
 state lock. It waits up to one second for each queue slot instead of treating a full reply
 queue as an immediate connection failure. The writer signals available slots;
 the condition wait releases the session lock, so close can wake the producer.

@@ -19,6 +19,9 @@ class DummyConnection:
     def close(self):
         return None
 
+    def wait_for_output(self):
+        return None
+
 
 class StateTests(unittest.TestCase):
     def setUp(self):

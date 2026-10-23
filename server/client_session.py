@@ -66,6 +66,21 @@ class ClientSession:
         self.server.state.require_unlocked()
         self._enqueue(msg, wait_for_space=True)
 
+    def wait_for_output(self) -> None:
+        """Pace request processing before it produces more notifications."""
+        self.server.state.require_unlocked()
+        deadline = time.monotonic() + self.OUTPUT_QUEUE_TIMEOUT
+        with self.send_lock:
+            while not self.closed.is_set():
+                # Leave room for atomic notifications and multi-line replies.
+                if self._outgoing.qsize() <= self.MAX_PENDING_MESSAGES // 2:
+                    return
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ConnectionError("client output queue did not drain")
+                self.send_lock.wait(remaining)
+            raise ConnectionError("session is closed")
+
     def _enqueue(self, msg: IRCMessage, *, wait_for_space: bool) -> None:
         payload = msg.to_bounded_bytes(
             truncate_trailing=msg.command in {"PART", "QUIT", "ERROR"}

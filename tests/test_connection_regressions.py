@@ -85,15 +85,57 @@ class ConnectionRegressionTests(unittest.TestCase):
         self.assertEqual(reply.params[-1], "")
 
     def test_maximum_ping_token_is_preserved_without_disconnect(self):
+        session = ClientSession(self.server, Mock(), ("::1", 2))
+        self.server.state.add_client(session.client)
+        self.server.state.set_nick(session.client, "pinging")
+        self.server.state.set_user(session.client, "user", "Real")
+        delivered = threading.Event()
+        replies = []
+
+        def receive(payload):
+            replies.append(IRCMessage.parse(payload.decode("utf-8")))
+            delivered.set()
+
+        session.socket.sendall.side_effect = receive
+        start_writer(self, session)
         for token in ("x" * 505, "x " * 251 + "xx"):
             with self.subTest(length=len(token)):
+                delivered.clear()
                 request = message("PING", token)
                 self.assertLessEqual(len(request.to_bytes()), 512)
-                self.server.handlers.handle(self.requester, request)
-                reply = self.requester.connection.send.call_args.args[0]
+                self.server.handlers.handle(session.client, request)
+                self.assertTrue(delivered.wait(2), "writer did not deliver PONG")
+                reply = replies[-1]
                 self.assertEqual(reply.command, "PONG")
                 self.assertEqual(reply.params[-1], token)
                 self.assertLessEqual(len(reply.to_bounded_bytes()), 512)
+                self.assertFalse(session.client.disconnected)
+
+    def test_long_ison_reply_is_delivered_by_the_session_writer(self):
+        self.server.server_name = "s" * 63
+        online = "n" * 30
+        self.add_client(online)
+        session = ClientSession(self.server, Mock(), ("::1", 2))
+        self.server.state.add_client(session.client)
+        self.server.state.set_nick(session.client, "reader")
+        self.server.state.set_user(session.client, "user", "Real")
+        delivered = threading.Event()
+        replies = []
+
+        def receive(payload):
+            incoming = IRCMessage.parse(payload.decode("utf-8"))
+            replies.append(incoming)
+            if incoming.command == "303":
+                delivered.set()
+
+        session.socket.sendall.side_effect = receive
+        start_writer(self, session)
+        request = message("ISON", " ".join([online] * 15))
+        self.assertEqual(len(request.to_bytes()), 472)
+        self.server.handlers.handle(session.client, request)
+        self.assertTrue(delivered.wait(2), "writer did not deliver ISON reply")
+        self.assertEqual(replies, [message("303", "reader", online, prefix="s" * 63)])
+        self.assertFalse(session.client.disconnected)
 
     def test_server_configuration_rejects_unsafe_or_overlong_prefix(self):
         for name in ("s" * 64, "bad name", ":bad", "bad\x00name", ""):

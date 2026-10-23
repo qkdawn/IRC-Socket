@@ -44,6 +44,15 @@ producer after its deadline, and wakes a waiting producer on close.
 Delivery contract tests reject reply waits inside nested state transactions,
 allow ordinary sends there, verify ownership cleanup after exceptions, and
 allow reply delivery when a different thread holds the state lock.
+Request pacing tests fill a session's queue before a 100-channel JOIN, verify
+that the producer waits outside state ownership while another client's PONG
+still arrives, then drain all queued output and all 300 JOIN/NAMES replies in
+order. Timeout and close tests cover stalled request producers and verify that
+PONG and QUIT bypass pacing. Real IPv6 tests repeat the 396-byte JOIN request
+three times, receive all replies, PART all channels and confirm a later PONG;
+another sends 600 pipelined PING requests and checks every response in order.
+Maximum-length PING and 472-byte ISON regressions run actual session writers
+and wait on delivery events before checking replies.
 A real IPv6 NAMES test receives complete 353/366 responses for 1,000 channels
 and verifies the connection still answers PING. Malformed-input integration
 checks ERROR delivery before EOF; writer tests verify cleanup even when ERROR

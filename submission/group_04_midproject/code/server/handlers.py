@@ -28,6 +28,9 @@ class IRCHandlers:
             raise ConnectionError("client has disconnected")
         client.last_activity = self.server.monotonic()
         command = incoming.command
+        # Keep liveness acknowledgements and immediate cleanup unthrottled.
+        if command not in {"PONG", "QUIT"} and not self.server.prepare_output(client):
+            return
         if command not in IRC_COMMANDS:
             numeric = (
                 numerics.ERR_NOTREGISTERED
@@ -160,6 +163,8 @@ class IRCHandlers:
             )
             return
         for channel in params[0].split(","):
+            if not self.server.prepare_output(client):
+                return
             if not is_channel(channel):
                 self.error(
                     client, numerics.ERR_NOSUCHCHANNEL, channel, "No such channel"
@@ -181,6 +186,8 @@ class IRCHandlers:
             return
         reason = params[1] if len(params) > 1 else "Leaving"
         for channel in params[0].split(","):
+            if not self.server.prepare_output(client):
+                return
             if not is_channel(channel):
                 self.error(
                     client, numerics.ERR_NOSUCHCHANNEL, channel, "No such channel"
@@ -202,6 +209,8 @@ class IRCHandlers:
             else self.server.state.channels_for(client)
         )
         for channel in channels:
+            if not self.server.prepare_output(client):
+                return
             if not is_channel(channel):
                 self.error(
                     client, numerics.ERR_NOSUCHCHANNEL, channel, "No such channel"

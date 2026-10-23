@@ -139,6 +139,60 @@ class DeliveryRegressionTests(unittest.TestCase):
         self.assertTrue(answered.wait(2))
         self.assertFalse(healthy.client.disconnected)
 
+    def test_multi_join_waits_for_output_headroom_without_holding_state(self):
+        joining = self.session("joining")
+        healthy = self.session("healthy")
+        notice = message("NOTICE", "joining", "queued")
+        for _ in range(joining.MAX_PENDING_MESSAGES):
+            joining.send(notice)
+        waiting, answered = threading.Event(), threading.Event()
+        healthy.socket.sendall.side_effect = lambda _payload: answered.set()
+        start_writer(self, healthy)
+        original_wait = joining.send_lock.wait
+        received, errors = [], []
+        completed = threading.Event()
+        channels = [f"#{index}" for index in range(100)]
+
+        def receive(payload):
+            incoming = IRCMessage.parse(payload.decode())
+            received.append(incoming)
+            if incoming.command == "366" and incoming.params[1] == channels[-1]:
+                completed.set()
+
+        def wait(timeout):
+            self.server.state.require_unlocked()
+            waiting.set()
+            return original_wait(timeout)
+
+        def produce():
+            try:
+                self.server.handlers.handle(joining.client, message("JOIN", ",".join(channels)))
+            except Exception as exc:
+                errors.append(exc)
+
+        joining.socket.sendall.side_effect = receive
+        with patch.object(joining.send_lock, "wait", side_effect=wait):
+            producer = threading.Thread(target=produce)
+            producer.start()
+            try:
+                self.assertTrue(waiting.wait(0.5))
+                self.server.handlers.handle(healthy.client, message("PING", "independent"))
+                self.assertTrue(answered.wait(0.5))
+                self.assertFalse(joining.client.disconnected)
+            finally:
+                start_writer(self, joining)
+                producer.join(2)
+        self.assertFalse(producer.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue(completed.wait(2))
+        replies = received[joining.MAX_PENDING_MESSAGES:]
+        self.assertEqual(len(replies), 300)
+        for index, channel in enumerate(channels):
+            join, names, end = replies[index * 3:index * 3 + 3]
+            self.assertEqual((join.command, names.command, end.command), ("JOIN", "353", "366"))
+            self.assertEqual((join.params[0], names.params[2], end.params[1]), (channel,) * 3)
+        self.assertFalse(joining.client.disconnected)
+
     def test_close_wakes_an_idle_writer_and_rejects_later_output(self):
         session = self.session("closing")
         worker = start_writer(self, session)
@@ -220,6 +274,52 @@ class DeliveryRegressionTests(unittest.TestCase):
         self.assertIsNone(self.server.state.find_nick("stalled"))
         self.assertEqual(self.server.state.channel_members("#hello"), [])
 
+    def test_stalled_request_output_allows_pong_and_quit_but_times_out_new_work(self):
+        for command in ("PONG", "QUIT", "JOIN"):
+            with self.subTest(command=command):
+                session = self.session("stalled" + command)
+                session.OUTPUT_QUEUE_TIMEOUT = 0.02
+                session.client.ping_sent = 1.0
+                for _ in range(session.MAX_PENDING_MESSAGES):
+                    session.send(message("NOTICE", session.client.nick, "queued"))
+                self.server.handlers.handle(
+                    session.client,
+                    message(command, self.server.server_name if command == "PONG" else "#new"),
+                )
+                if command == "PONG":
+                    self.assertIsNone(session.client.ping_sent)
+                    self.assertFalse(session.client.disconnected)
+                else:
+                    self.assertTrue(session.client.disconnected)
+                    self.assertIsNone(self.server.state.find_nick("stalled" + command))
+                    self.assertEqual(self.server.state.channels_for(session.client), [])
+
+    def test_close_wakes_a_request_waiting_for_output_headroom(self):
+        session = self.session("closingRequest")
+        for _ in range(session.MAX_PENDING_MESSAGES):
+            session.send(message("NOTICE", "closingRequest", "queued"))
+        waiting = threading.Event()
+        results = []
+        original_wait = session.send_lock.wait
+
+        def wait(timeout):
+            waiting.set()
+            return original_wait(timeout)
+
+        with patch.object(session.send_lock, "wait", side_effect=wait):
+            producer = threading.Thread(
+                target=lambda: results.append(self.server.prepare_output(session.client))
+            )
+            producer.start()
+            try:
+                self.assertTrue(waiting.wait(0.5))
+                self.server.disconnect(session.client)
+            finally:
+                session.close()
+                producer.join(2)
+        self.assertFalse(producer.is_alive())
+        self.assertEqual(results, [False])
+
     def test_close_wakes_a_reply_producer_waiting_for_space(self):
         session = self.session("closing")
         for _ in range(session.MAX_PENDING_MESSAGES):
@@ -255,8 +355,12 @@ class DeliveryRegressionTests(unittest.TestCase):
             with self.server.state.locked():
                 with self.assertRaisesRegex(RuntimeError, "holding IRC state"):
                     self.server.send_reply(session.client, reply)
+                with self.assertRaisesRegex(RuntimeError, "holding IRC state"):
+                    self.server.prepare_output(session.client)
             with self.assertRaisesRegex(RuntimeError, "holding IRC state"):
                 session.send_reply(reply)
+            with self.assertRaisesRegex(RuntimeError, "holding IRC state"):
+                session.wait_for_output()
             self.server.send(session.client, message("NOTICE", "replying", "queued"))
         self.assertEqual(session._outgoing.qsize(), 1)
         with self.assertRaisesRegex(ValueError, "failed transaction"):

@@ -28,7 +28,7 @@ class HandlerTests(unittest.TestCase):
                 self.assertLessEqual(len(reply.to_bytes()), 512)
 
     def test_unexpected_error_is_not_sent_as_unknown_command(self):
-        server = SimpleNamespace(monotonic=lambda: 1.0, send=Mock())
+        server = SimpleNamespace(monotonic=lambda: 1.0, send=Mock(), prepare_output=lambda _client: True)
         client = ClientState(Mock(), ("host", 1), nick="alice", username="u")
         handlers = IRCHandlers(server)
 

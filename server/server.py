@@ -84,6 +84,19 @@ class IRCServer:
     def send(self, client: ClientState, msg: IRCMessage) -> None:
         self.send_many((client,), msg)
 
+    def prepare_output(self, client: ClientState) -> bool:
+        """Wait for request output headroom before entering a state transaction."""
+        self.state.require_unlocked()
+        if client.disconnected:
+            return False
+        try:
+            client.connection.wait_for_output()
+        except (ConnectionError, OSError) as exc:
+            logger.info("Output stalled for %s: %s", client.address, exc)
+            self.disconnect(client, "Output timeout")
+            return False
+        return True
+
     def send_reply(self, client: ClientState, msg: IRCMessage) -> None:
         """Allow bounded queue waits only outside a state transaction."""
         self.state.require_unlocked()

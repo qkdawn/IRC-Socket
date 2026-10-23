@@ -95,11 +95,17 @@ updates, error handling, documentation wording and packaged runtime sources.
   executors for deferral, ISON and shared LIST/LUSERS requests. One `_WhoQuery`
   object owns an active ISON query's lifecycle; completion, timeout and reconnect
   release it together instead of resetting five independent fields.
+- Request production waits outside the state lock for half-queue headroom,
+  including each channel of JOIN/PART/NAMES. A 396-byte, 100-channel JOIN no
+  longer fills its own queue and disconnects a reading client. PONG and QUIT
+  bypass pacing; stalled producers still time out and close wakes their waits.
+  Atomic broadcasts preserve their nonwaiting delivery and bounded queue limit.
+  Long PING/ISON tests use session writer threads and explicit delivery events.
 
 ## Verification
 
-- Windows `python -m pytest -q`: 164 tests and 86 subtests passed.
-- Windows `python -m unittest discover -q`: 164 tests passed.
+- Windows `python -m pytest -q`: 170 tests and 92 subtests passed.
+- Windows `python -m unittest discover -q`: 170 tests passed.
 - Before the criterion I extension, Ubuntu WSL2 `python3 -m unittest discover`
   passed the then-current 106 tests; it has not been rerun for this extension.
 - `ruff check .` and `git diff --check`: passed.
